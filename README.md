@@ -123,6 +123,7 @@ dev-task-router/
 - [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) — 完整项目方案
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — 分阶段开发路线
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 架构与模块边界
+- [`docs/REFERENCES.md`](docs/REFERENCES.md) — Aider、LiteLLM、OpenHands、Roomote 等设计借鉴说明
 
 ## 当前状态
 
