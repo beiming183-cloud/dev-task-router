@@ -18,6 +18,7 @@ local = ["pywinauto>=0.6.8"]
 
 [project.scripts]
 autodev = "dev_task_router.cli:main"
+autodev-mode = "dev_task_router.local_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
