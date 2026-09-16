@@ -2,126 +2,76 @@
 
 ## 总原则
 
-按“先闭环、再智能、最后做界面”的顺序推进。
+按“先闭环、再路由、再验证、最后做界面和远程控制”的顺序推进。
 
-不要一开始做复杂 UI、服务器、多用户和 Agent Swarm。第一目标是让一个真实任务可以：
-
-```text
-读取计划 → 执行任务 → 检查结果 → 保存状态 → 继续下一步
-```
+项目保持轻量：V1.0 前不要求自建服务器、数据库集群或 Agent Swarm。
 
 ---
 
 ## V0.1 — 最小可运行闭环 ✅
 
-### 目标
+已完成：
 
-先证明 Workflow Core 能稳定运行，不在第一版同时塞入模型路由、Git 验证和 UI。
-
-### 已完成
-
-- `autodev init`
-- `autodev plan`
-- `autodev start`
-- `autodev status`
-- `autodev pause`
-- `autodev resume`
-- `.autodev/project.yaml`
-- `.autodev/plan.yaml`
-- `.autodev/state.json`
-- `READY / RUNNING / PAUSED / FAILED / PASSED` 工作流状态
-- `PENDING / RUNNING / FAILED / PASSED` 任务状态
-- 单一 `CommandExecutor`
-- argv 命令执行，不使用 `shell=True`
-- 每个 Task 可配置 `checks`
-- attempts / last_error / started_at / finished_at 持久化
+- `autodev init / plan / start / status / pause / resume`
+- `.autodev/project.yaml / plan.yaml / state.json`
+- READY / RUNNING / PAUSED / FAILED / PASSED
+- 单一安全 `CommandExecutor`
+- Task checks
+- 失败状态、attempts、时间持久化
 - plan/state 一致性保护
-- 缺失命令可靠进入 FAILED
-- FAILED 状态不会被 `autodev start` 静默重试
-- pytest 测试集
-- GitHub Actions 项目自身 CI
+- pytest + GitHub Actions CI
 
-### 验证结果
-
-```text
-本地 pytest       → 6 passed
-GitHub Actions    → success
-init/start/status → PASSED
-```
-
-### V0.1 有意不做
-
-- 真正的 LLM / Coding Agent 接入；
-- LOW / MEDIUM / HIGH 实际模型路由；
-- Project / Stage / Step 完整层级；
-- 自动 retry；
-- Reviewer；
-- Git diff Checker；
-- Handoff；
-- VS Code UI；
-- GitHub Actions 作为用户任务执行器。
-
-这些功能不塞进 V0.1，避免第一版范围膨胀。
+验证：本地与 GitHub Actions 均通过。
 
 ---
 
-## V0.2 — 任务层级与真正的多模型路由
+## V0.2 — 任务层级与多模型路由 ✅
 
-### 目标
+目标：让不同类型的任务真正能够被路由到不同等级的 Model Profile / Executor。
 
-从“任务能可靠跑”升级到“不同任务能交给不同等级的模型”，开始实际解决 Token / 强模型额度浪费问题。
+已实现：
 
-### 功能
+- Project → Stage → Step → Task
+- V0.1 flat `tasks:` 兼容读取
+- `ModelLevel = NONE / LOW / MEDIUM / HIGH`
+- `TaskRole = PLANNER / EXECUTOR`
+- `.autodev/models.yaml`
+- RuleRouter
+- task.kind 默认路由
+- Task 显式 level 覆盖默认路由
+- Model Profile：provider / model / executor
+- Executor Protocol + Registry
+- `command` Executor
+- 通用 `agent-cli` Executor
+- `handoff.md`
+- `usage.jsonl`
+- state 记录 stage / step / role / kind / 实际 route
+- V0.1 项目缺失 models.yaml 时自动补默认配置
+- `autodev models`
+- `autodev handoff`
+- `autodev plan` 显示最终路由
 
-- Project → Stage → Step → Task 数据层级
-- `models.yaml`
-- `LOW / MEDIUM / HIGH / NONE` 明确枚举
-- 规则 Router
-- 不同等级映射不同模型 / Executor
-- Executor 抽象接口
-- Planner 与 Executor 分离
-- Handoff 文件
-- 每个 Task 记录计划模型等级与实际执行器
-- 初步 usage 日志
-- 保持 V0.1 flat task plan 的兼容读取或提供迁移工具
+验证：V0.1 回归测试 + V0.2 新测试共 **14 passed**，并用 fake Agent CLI 验证模型名和 prompt 确实传递给被路由的外部执行器。
 
-### 验收标准
-
-同一项目中至少能表达并执行：
-
-```text
-Stage: architecture
-  HIGH task
-
-Stage: implementation
-  MEDIUM task
-  LOW task
-
-Stage: test
-  NONE task
-```
-
-并且切换执行器后状态不丢失，重新打开项目后能够继续。
+详细说明见 [`V0.2.md`](V0.2.md)。
 
 ---
 
 ## V0.3 — 验证、重试与模型升级闭环
 
-### 目标
+目标：解决“AI 说完成但实际没完成”，并在便宜模型处理不了时自动升级。
 
-解决“AI 说完成但实际没完成”。
+计划功能：
 
-### 功能
-
-- Checker
+- Checker 抽象
 - Git diff 检查
-- Reviewer
 - acceptance criteria
+- Reviewer
 - Retry
 - 最大重试次数
 - BLOCKED 状态
-- 模型升级机制
-- 失败原因结构化记录
+- 失败原因结构化
+- 模型升级策略
 
 默认升级示例：
 
@@ -131,84 +81,50 @@ MEDIUM fail
 → HIGH
 ```
 
-### 验收标准
-
-故意制造错误修改，系统能够识别 FAIL，而不是错误进入 PASSED；超过最大重试次数后进入 BLOCKED。
+验收标准：故意制造错误修改，系统必须识别 FAIL；超过重试上限进入 BLOCKED，而不是错误进入 PASSED。
 
 ---
 
 ## V0.4 — VS Code 轻量插件
 
-### 目标
+目标：让日常使用不需要一直操作 CLI。
 
-让日常操作不必一直使用 CLI。
+侧栏计划显示：
 
-### 功能
+- Project / Stage / Step / Task
+- 状态
+- 模型等级与实际 Profile
+- Executor
+- Logs / Diff / Tests
 
-侧栏显示：
+按钮：Continue / Pause / Retry / Stop。
 
-- 当前 Project；
-- 当前 Stage / Step；
-- Task 状态；
-- 模型等级；
-- 当前 Executor；
-- 日志；
-- Diff；
-- Tests。
-
-按钮：
-
-- Continue
-- Pause
-- Retry
-- Stop
-
-### 原则
-
-VS Code 只做 UI，不复制 Core 逻辑。
+原则：VS Code 只做 UI，不复制 Core 逻辑。
 
 ---
 
 ## V0.5 — GitHub 工程闭环
 
-### 目标
+目标：把 GitHub 作为远程事实来源和无需自建服务器的云端补充执行层。
 
-把 GitHub 作为远程事实来源和云端补充执行层。
+计划功能：
 
-### 功能
-
-- Branch / Commit 管理
-- Push
-- GitHub Actions 状态读取
+- Branch / Commit / Push
+- GitHub Actions 状态
 - Test / Build workflow
 - Artifact
-- Android APK 等构建产物支持
-- 可选 Git worktree
-
-### 验收标准
-
-本地完成代码任务后，GitHub Actions 能自动测试 / 构建，并把结果同步回状态。
+- Android APK 等构建产物
+- 可选 git worktree
 
 ---
 
 ## V0.6 — 手机控制
 
-### 目标
+目标：电脑不在身边时，通过 GitHub 完成查看和基础控制。
 
-不自建服务器的情况下，让手机能查看和触发部分任务。
+第一阶段直接使用 GitHub App 查看 Commit、PR、Actions、Artifact。
 
-### 第一阶段
-
-直接依赖 GitHub App：
-
-- 查看 Commit；
-- 查看 Actions；
-- 查看 Artifact；
-- 查看 PR。
-
-### 第二阶段
-
-支持 Issue Command：
+第二阶段加入 Issue Command：
 
 ```text
 /autodev status
@@ -217,47 +133,34 @@ VS Code 只做 UI，不复制 Core 逻辑。
 /autodev pause
 ```
 
-### 第三阶段（可选）
-
-开发薄 PWA，只负责状态展示和控制，不承担开发环境。
+第三阶段再考虑薄 PWA；PWA 只做状态展示与控制，不承担开发环境。
 
 ---
 
 ## V0.7 — 自动复杂度判断
 
-### 目标
+从固定 RuleRouter 升级为半自动分类。
 
-从固定规则进一步升级为半自动模型路由。
+可能特征：
 
-### 特征
+- 文件数量
+- 代码影响范围
+- 是否涉及核心架构 / 状态系统
+- 历史失败次数
+- 测试覆盖情况
+- 安全 / 数据迁移风险
 
-- 文件数量；
-- 代码影响范围；
-- 是否修改核心架构；
-- 是否涉及状态系统；
-- 历史失败次数；
-- 是否涉及安全 / 数据迁移；
-- 测试覆盖情况。
-
-输出：
-
-```text
-LOW / MEDIUM / HIGH
-```
-
-必须显示路由原因。
+输出 `LOW / MEDIUM / HIGH`，并必须显示路由原因。
 
 ---
 
 ## V0.8 — 成本优化
 
-### 功能
-
-- Token 统计
+- Provider Token usage
 - 不同模型任务成功率
 - Retry 成本
-- High 使用比例
-- 全 High 成本估算 vs 实际成本
+- HIGH 使用比例
+- 全 HIGH 成本 vs 实际成本
 - Context Budget
 - 自动上下文裁剪
 
@@ -265,37 +168,19 @@ LOW / MEDIUM / HIGH
 
 ## V0.9 — 自适应路由
 
-根据历史任务统计：
+基于历史：
 
 ```text
-Task type
-→ Model
-→ Success / Fail
-→ Retry count
-→ Cost
+Task type → Model → Success / Fail → Retry → Cost
 ```
 
-逐步调整默认 Router。
-
-例如：
-
-```text
-某类任务 MEDIUM 90% 一次成功
-→ 不再默认 HIGH
-```
-
-或：
-
-```text
-某类任务 MEDIUM 连续高失败率
-→ 默认升级 HIGH
-```
+逐步调整默认 Router，而不是永久依赖手写规则。
 
 ---
 
 ## V1.0 — 第一版正式发布
 
-### 必备能力
+目标能力：
 
 - Project / Stage / Step / Task
 - 持久化状态
@@ -303,37 +188,28 @@ Task type
 - Planner / Executor / Checker / Reviewer
 - Retry / Blocked / Resume
 - Git 验证
-- 测试 / Build 验证
-- Handoff
-- Context Manager
-- CLI
-- VS Code UI
+- Test / Build 验证
+- Handoff / Context Manager
+- CLI + VS Code UI
 - GitHub Actions
 - 手机查看 / 基础控制
 - Token 使用统计
 
-### 不作为 V1.0 阻塞项
-
-- 云端服务器；
-- 多用户；
-- Agent Swarm；
-- 企业权限；
-- Jira / Slack；
-- 自建 Sandbox 平台。
+不作为 V1.0 阻塞项：自建服务器、多用户、Agent Swarm、企业权限、Jira / Slack、自建 Sandbox 平台。
 
 ---
 
-# 当前立即开发顺序
+# 当前下一步
 
-V0.1 已完成。下一阶段按下面顺序进入 V0.2：
+V0.1 与 V0.2 已完成。进入 V0.3 时优先顺序：
 
-1. 定义 Project / Stage / Step / Task 层级模型。
-2. 定义 `ModelLevel = NONE / LOW / MEDIUM / HIGH`。
-3. 实现兼容 flat task plan 的层级 Plan Loader。
-4. 建立 `models.yaml`。
-5. 实现 RuleRouter。
-6. 抽象 Executor 接口，并让现有 CommandExecutor 实现它。
-7. 加入 Handoff Writer。
-8. 在 state 中记录 stage / step / requested model / executor。
-9. 增加 Router 与恢复流程测试。
-10. 再接第一个真实模型执行器。
+1. 定义 Checker 接口和 acceptance criteria。
+2. 实现 Git diff / 文件存在 / 命令退出码等基础 Checker。
+3. 增加 `BLOCKED` 状态。
+4. 增加显式 `retry`。
+5. 增加 max attempts。
+6. 实现模型升级策略。
+7. 加入独立 Reviewer 接口。
+8. 让失败、重试、升级全部写入 usage / handoff。
+9. 增加故意失败的端到端测试。
+10. V0.3 稳定后再做 VS Code UI。

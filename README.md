@@ -4,151 +4,141 @@
 
 一个轻量级、多模型、可恢复、可验证的 AI 开发任务编排工具。
 
-它不试图重新做一个 AI IDE，也不自己承担所有编码工作，而是工作在 Codex、Claude Code、Gemini CLI、Aider 等现有 Coding Agent 之上：把一个大开发任务拆成可执行的小步骤，根据复杂度分配不同等级的模型，自动检查真实结果，并保存进度以便随时继续。
+它不重新做一个 AI IDE，而是在 Codex、Claude Code、Gemini CLI、Aider 等现有 Coding Agent 之上增加一层轻量 Workflow Layer：把大任务拆成可执行的小任务，根据复杂度选择不同模型和执行器，检查真实结果，并保存状态供后续继续。
 
 ## 为什么做这个项目
 
-长时间使用 AI 编程工具时，常见几个问题：
-
-- 简单任务和复杂任务都使用同一个强模型，浪费额度和 Token；
-- 一个大任务塞进单次对话，模型容易跑偏或遗漏步骤；
-- AI 会说“已经完成”，但实际上可能没有代码修改、测试或构建产物；
-- 中途中断、切换模型或重新打开项目后，需要重新解释大量上下文；
-- 规划、实现、测试、审核混在一个上下文中，既浪费 Token，也不利于定位错误；
-- 希望电脑和手机都能查看进度，但又不想先学习和维护复杂服务器。
-
-Dev Task Router 的目标，就是在现有 AI 编程工具上增加一层轻量的 **Workflow Layer（工作流层）**。
+- 简单任务和复杂任务都使用强模型，会浪费 Token 和高级模型额度；
+- 大任务全部塞进一个对话，容易跑偏、漏步骤；
+- AI 说“完成”不等于真的改了代码或跑过测试；
+- 中断或换模型后，经常需要重新解释大量上下文；
+- 规划、执行、测试和审核混在一起，不利于定位错误；
+- 希望手机和电脑都能参与，但不想先维护复杂服务器。
 
 ## 核心流程
 
 ```text
-用户目标
-   ↓
-Planner：拆分 Project / Stage / Step / Task
-   ↓
-Router：按任务复杂度选择 LOW / MEDIUM / HIGH
-   ↓
-Runner：调用 Codex / Claude Code / Gemini / Aider
-   ↓
-Checker：检查 Git diff / test / build / artifact
-   ↓
-Reviewer：独立审核结果
-   ↓
-State：保存状态和 HANDOFF
-   ↓
-下一任务
+Project
+  ↓
+Stage
+  ↓
+Step
+  ↓
+Task
+  ↓
+RuleRouter → NONE / LOW / MEDIUM / HIGH
+  ↓
+Model Profile → provider / model / executor
+  ↓
+Executor → command / agent-cli / future adapters
+  ↓
+checks + state + handoff + usage
 ```
 
-## 核心能力
+## 当前能力
 
-- **任务拆分**：把大型开发需求拆成 Stage → Step → Task。
-- **多模型路由**：简单任务使用低成本模型，复杂任务使用强模型。
-- **Planner / Executor / Reviewer 分离**：避免一个模型既制定方案、又执行、又自己宣布通过。
-- **真实完成验证**：以 Git diff、测试、构建、Commit、Artifact 为完成依据。
-- **断点恢复**：关闭工具、切换模型后可以从上一次状态继续。
-- **Handoff 压缩上下文**：模型切换时只读取必要状态，不重复消耗整个历史上下文。
-- **可插拔执行器**：未来可以同时接入 Codex、Claude Code、Gemini CLI、Aider 等。
-- **本地优先**：第一阶段不要求 VPS、数据库、Redis 或 Docker 集群。
-- **GitHub Actions 补充云执行**：后续用 GitHub Actions 承担测试、构建、APK 等无需本机持续在线的任务。
-- **手机 + 电脑协同**：电脑负责本地开发，手机通过 GitHub / 后续轻量界面查看和控制任务。
+- **Project → Stage → Step → Task** 层级计划；
+- 兼容 V0.1 flat task plan；
+- `NONE / LOW / MEDIUM / HIGH` 模型等级；
+- `PLANNER / EXECUTOR` 任务角色；
+- `models.yaml` 模型 Profile；
+- 基于任务类型的 RuleRouter；
+- Task 显式 level 覆盖默认路由；
+- Executor 抽象接口与 Registry；
+- 本地 `command` Executor；
+- 通用 `agent-cli` Executor，可调用外部 Coding Agent CLI；
+- `state.json` 持久化；
+- `handoff.md` 自动生成；
+- `usage.jsonl` 初步执行记录；
+- `pause / resume`；
+- GitHub Actions 项目自身 CI。
 
-## 模型等级
+## 默认模型路由
 
-第一版不做复杂 AI 分类，先采用稳定的规则路由：
-
-| 等级 | 典型任务 |
+| Task kind | Level |
 | --- | --- |
-| `LOW` | 文件搜索、文档、Handoff、Commit Message、小修改 |
-| `MEDIUM` | 普通功能开发、普通 Bug、一般测试错误分析 |
-| `HIGH` | 架构设计、复杂状态逻辑、疑难 Bug、最终 Review |
-| `NONE` | 纯测试、构建等无需模型的步骤 |
+| `repo_search` / `docs` / `handoff` / `simple_edit` | `LOW` |
+| `normal_code` / `normal_debug` | `MEDIUM` |
+| `architecture` / `planning` / `complex_code` / `hard_debug` / `review` | `HIGH` |
+| `test` / `build` | `NONE` |
+| 未知类型 | `MEDIUM` |
 
-实际模型与等级解耦，例如：
+`models.yaml` 再把等级映射到实际 Provider、Model 和 Executor：
 
 ```yaml
-models:
-  low: gemini
-  medium: gpt-medium
-  high: gpt-high
+profiles:
+  NONE:
+    provider: local
+    model: none
+    executor: command
+
+  LOW:
+    provider: local
+    model: low
+    executor: command
+
+  MEDIUM:
+    provider: local
+    model: medium
+    executor: command
+
+  HIGH:
+    provider: local
+    model: high
+    executor: command
 ```
 
-以后更换模型时，只需要修改配置，不需要改工作流。
+要接外部 Coding Agent，可以把某个 Profile 改成 `agent-cli`，并配置 argv 模板。详见 [`docs/V0.2.md`](docs/V0.2.md)。
 
-## 设计原则
-
-1. **轻量优先**：插件负责调度，不重新实现完整 AI IDE。
-2. **本地优先**：先让普通电脑直接使用，不要求服务器知识。
-3. **Git 是事实来源**：AI 的文字回复不能代表任务完成。
-4. **强模型只做值得做的事**：把昂贵推理集中在架构、复杂实现和审核。
-5. **状态必须持久化**：每个任务都可以暂停、重试和恢复。
-6. **先做闭环，再做智能**：先把 Plan → Run → Check → Review 跑通，再做自动复杂度判断。
-
-## 计划中的项目结构
-
-```text
-dev-task-router/
-├─ src/
-│  ├─ planner/
-│  ├─ router/
-│  ├─ runner/
-│  ├─ checker/
-│  ├─ reviewer/
-│  ├─ state/
-│  ├─ context/
-│  └─ git/
-├─ executors/
-│  ├─ codex.py
-│  ├─ claude.py
-│  ├─ gemini.py
-│  └─ aider.py
-├─ cli/
-├─ vscode/
-├─ workflows/
-├─ tests/
-└─ docs/
-```
-
-## 当前路线
-
-- **V0.1 ✅**：状态机 + YAML 计划 + 单执行器 + CLI 最小闭环
-- **V0.2**：LOW / MEDIUM / HIGH 多模型路由
-- **V0.3**：Checker + Reviewer + Retry + 模型升级机制
-- **V0.4**：VS Code 轻量面板
-- **V0.5**：GitHub / Actions / Artifact / Build
-- **V0.6**：手机控制与 GitHub 命令
-- **V1.0**：完整的多模型、可恢复、可验证 AI 开发编排工具
-
-详细设计见：
-
-- [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) — 完整项目方案
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — 分阶段开发路线
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 架构与模块边界
-- [`docs/REFERENCES.md`](docs/REFERENCES.md) — Aider、LiteLLM、OpenHands、Roomote 等设计借鉴说明
-- [`docs/V0.1.md`](docs/V0.1.md) — V0.1 实现与使用方法
-
-## 当前状态
-
-**Status: V0.1 Core complete on `main`**
-
-第一条最小闭环已经跑通：
-
-> `plan.yaml` → 校验任务 → 单执行器运行 → checks → 持久化 `state.json` → 下一任务 / FAILED / PASSED。
-
-V0.1 当前提供：
+## CLI
 
 ```text
 autodev init
 autodev plan
+autodev models
 autodev start
 autodev pause
 autodev resume
 autodev status
+autodev handoff
 ```
 
-本地测试与 GitHub Actions 均已通过，当前测试集为 **6 passed**。
+## 设计原则
+
+1. **轻量优先**：插件负责调度，不复制完整 AI IDE。
+2. **本地优先**：不要求 VPS、Redis、PostgreSQL 或容器集群。
+3. **Git / 测试结果才是事实**：AI 的文字回复不能代表工程完成。
+4. **强模型只做值得做的事**：架构、复杂实现、疑难问题和最终审核。
+5. **状态必须持久化**：可以暂停、恢复、换模型。
+6. **先做可靠闭环，再加自动智能**。
+
+## 路线图
+
+- **V0.1 ✅**：状态机 + YAML 计划 + 单执行器 + CLI 最小闭环
+- **V0.2 ✅**：任务层级 + 多模型路由 + Executor 抽象 + Handoff
+- **V0.3**：Checker + Reviewer + Retry + 模型升级机制
+- **V0.4**：VS Code 轻量面板
+- **V0.5**：GitHub / Actions / Artifact / Build 工程闭环
+- **V0.6**：手机控制与 GitHub 命令
+- **V1.0**：完整的多模型、可恢复、可验证 AI 开发编排工具
+
+## 文档
+
+- [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) — 完整项目方案
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — 分阶段路线
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 架构与模块边界
+- [`docs/REFERENCES.md`](docs/REFERENCES.md) — 设计借鉴
+- [`docs/V0.1.md`](docs/V0.1.md) — V0.1
+- [`docs/V0.2.md`](docs/V0.2.md) — V0.2
+
+## 当前状态
+
+**Status: V0.2 implemented on `feature/v0.2-routing`, pending CI / merge.**
+
+V0.2 本地回归测试：**14 passed**。
 
 ---
 
-Dev Task Router 的核心不是“再造一个会写代码的 AI”，而是回答五个问题：
+Dev Task Router 的核心不是“再造一个会写代码的 AI”，而是回答：
 
 > **做什么、谁来做、用哪个模型做、怎么证明做完、失败后从哪里继续。**
