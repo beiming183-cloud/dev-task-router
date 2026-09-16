@@ -196,7 +196,8 @@ class OutcomeCalibrator:
     The report is descriptive evidence. V1.0 deliberately does not lower HIGH or
     rewrite thresholds from a small sample automatically. A HIGH one-shot success is
     only a candidate for later controlled lower-profile comparison; it is not proof
-    that MEDIUM or LOW would have succeeded.
+    that MEDIUM or LOW would have succeeded. Reporting is read-only and never advances
+    workflow timestamps or initializes missing Task state.
     """
 
     def __init__(self, root: Path, plan: Plan, store: StateStore):
@@ -204,8 +205,27 @@ class OutcomeCalibrator:
         self.plan = plan
         self.store = store
 
+    def _read_state(self) -> dict:
+        if not self.store.exists():
+            return {"project": self.plan.project, "tasks": {}}
+        state = self.store.load()
+        if state.get("project") != self.plan.project:
+            raise ValueError("state project does not match plan project")
+        tasks = state.get("tasks")
+        if not isinstance(tasks, dict):
+            raise ValueError("state must contain a tasks mapping")
+        expected = {task.id for task in self.plan.tasks}
+        removed = set(tasks) - expected
+        if removed:
+            raise ValueError(
+                "plan removed tasks after state creation; refusing to ignore durable task state: "
+                + ", ".join(sorted(removed))
+            )
+        return state
+
     def run(self) -> CalibrationReport:
-        state = self.store.ensure_for_plan(self.plan)
+        state = self._read_state()
+        durable_tasks = state.get("tasks", {})
         mutable = {
             level.value: {
                 "tasks": 0,
@@ -273,7 +293,9 @@ class OutcomeCalibrator:
                     bucket["output_tokens"] += out_tok
 
         for task in self.plan.tasks:
-            item = state["tasks"][task.id]
+            item = durable_tasks.get(task.id)
+            if not isinstance(item, dict):
+                continue
             history = item.get("route_history") or []
             if not history:
                 continue
