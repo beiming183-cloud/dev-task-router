@@ -1,0 +1,20 @@
+{
+  "name": "dev-task-router",
+  "interface": {
+    "displayName": "项目拆解器"
+  },
+  "plugins": [
+    {
+      "name": "dev-task-router",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dev-task-router"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -2,165 +2,145 @@
 
 > 中文名：**项目拆解器**
 
-一个轻量级、多模型、可恢复、可验证的 AI 开发任务编排工具。
+一个轻量级、多模型、可恢复、可验证的 AI 开发任务拆解与路由插件。
 
-它不重新做一个 AI IDE，而是在 Codex、Claude Code、Gemini CLI、Aider 等现有 Coding Agent 之上增加一层轻量 Workflow Layer：把大任务拆成可执行的小任务，根据复杂度选择不同模型和执行器，用确定性检查与独立 Reviewer 验证结果，并保存状态供后续继续。
+从 V0.4 开始，项目的主要产品形态改为 **ChatGPT / Codex Plugin + Skills**，而不是 VS Code 插件。它的核心不是“再造一个 AI IDE”，而是把一个开发目标拆成不同难度的任务，让不同任务从一开始就使用匹配的模型档位。
 
-## 为什么做这个项目
-
-- 简单任务和复杂任务都使用强模型，会浪费 Token 和高级模型额度；
-- 大任务全部塞进一个对话，容易跑偏、漏步骤；
-- AI 说“完成”不等于真的改了代码或跑过测试；
-- 中断或换模型后，经常需要重新解释大量上下文；
-- 便宜模型失败后，希望自动升级，而不是一开始所有任务都用最强模型；
-- 希望手机和电脑都能参与，但不想先维护复杂服务器。
-
-## 当前核心流程
+## 核心思想
 
 ```text
+开发目标
+  ↓
 Project → Stage → Step → Task
-                 ↓
-        RuleRouter / Model Profile
-                 ↓
-              Executor
-                 ↓
-              Checker
-                 ↓
-          fail? → Retry
-                    ↓
-                 Escalate
-                    ↓
-                 BLOCKED
-                 ↓ pass
-             Reviewer（可选）
-                 ↓
-                PASS
+  ↓
+判断真实难度
+  ↓
+NONE / LOW / MEDIUM / HIGH
+  ↓
+直接匹配对应模型档位
 ```
 
-## 当前能力
+不是把所有任务先交给弱模型。
 
-- **Project → Stage → Step → Task** 层级计划；
-- 兼容 V0.1 flat task plan；
-- `NONE / LOW / MEDIUM / HIGH` 模型等级；
-- `PLANNER / EXECUTOR / REVIEWER` 角色；
-- `models.yaml` 模型 Profile；
-- 基于任务类型的 RuleRouter；
-- Executor 抽象接口与 Registry；
-- 本地 `command` Executor；
-- 通用 `agent-cli` Executor；
-- `checks` 确定性检查；
-- `require_diff` Git 工作区变化 Gate；
-- `max_attempts` 自动 Retry；
-- `LOW → MEDIUM → HIGH` 模型升级；
-- `BLOCKED` 状态；
-- 独立 Reviewer Gate；
-- acceptance criteria；
-- `autodev retry <task>` 人工重开任务；
-- `state.json` / `handoff.md` / `usage.jsonl` 持久化；
-- `pause / resume`；
-- GitHub Actions 项目自身 CI。
+第一次就按预测难度分配：
 
-## 默认模型路由
+```text
+简单任务 → LOW
+普通任务 → MEDIUM
+复杂任务 → HIGH
+确定性测试/构建 → NONE
+```
 
-| Task kind | Level |
+如果模型任务因为真正的推理/实现问题失败，说明初始难度可能低估，下一次向上重新分类：
+
+```text
+LOW failure    → MEDIUM
+MEDIUM failure → HIGH
+HIGH failure   → HIGH retry / BLOCKED
+```
+
+权限、凭据、限流、网络、工具不可用等基础设施失败不会被误判成“任务太难”。
+
+## 当前 Plugin 结构
+
+```text
+.agents/plugins/marketplace.json
+
+plugins/dev-task-router/
+├── .codex-plugin/plugin.json
+├── README.md
+└── skills/
+    ├── index/SKILL.md
+    ├── decompose-project/SKILL.md
+    ├── classify-task/SKILL.md
+    └── create-handoff/SKILL.md
+```
+
+V0.4 使用 **skill-only** 方案，不要求自建服务器、数据库、MCP server 或 VS Code Extension。
+
+## 四个核心 Skills
+
+- **index**：统一难度、路由、失败重分类、验证与 handoff 规则；
+- **decompose-project**：把开发目标拆成 `Project → Stage → Step → Task`；
+- **classify-task**：单独判断任务难度并检查是否分配过高/过低；
+- **create-handoff**：为下一模型/下一对话生成最小必要上下文。
+
+## 难度定义
+
+| Level | 典型任务 |
 | --- | --- |
-| `repo_search` / `docs` / `handoff` / `simple_edit` | `LOW` |
-| `normal_code` / `normal_debug` | `MEDIUM` |
-| `architecture` / `planning` / `complex_code` / `hard_debug` / `review` | `HIGH` |
-| `test` / `build` | `NONE` |
-| 未知类型 | `MEDIUM` |
+| `NONE` | test / build / formatter / artifact collection |
+| `LOW` | 搜索文件、文档、小改动、机械整理 |
+| `MEDIUM` | 普通功能、常规 Bug、多文件但边界明确的修改 |
+| `HIGH` | 架构、核心状态语义、跨模块、高风险或强歧义任务 |
 
-`models.yaml` 再把等级映射到具体 Provider、Model 和 Executor。
+LOW / MEDIUM / HIGH 是**任务难度等级**，不是价格等级。
 
-## Retry / Escalation 示例
+## V0.1–V0.3 Python Core
 
-```yaml
-- id: implement-feature
-  title: Implement feature
-  kind: normal_code
-  max_attempts: 3
-  escalate_after: 2
-  prompt: Implement the feature.
-```
+早期 Core 继续保留，作为可执行参考和后续执行集成基础，目前已经支持：
 
-若 `normal_code` 默认是 `MEDIUM`：
+- Project / Stage / Step / Task；
+- RuleRouter；
+- `command` / `agent-cli` Executor；
+- Checker / `require_diff`；
+- Reviewer；
+- Retry / Escalation / BLOCKED；
+- state / handoff / usage 持久化；
+- GitHub Actions CI。
 
-```text
-attempt 1 → MEDIUM
-attempt 2 → MEDIUM
-attempt 3 → HIGH
-```
+V0.4 以后，产品入口优先发展 Plugin / Skills；Python Core 不删除。
 
-重试预算耗尽后进入 `BLOCKED`，不会无限循环。
+## Plugin 能做什么
 
-## Reviewer 示例
-
-```yaml
-- id: semantic-selection
-  title: Implement semantic selection
-  kind: complex_code
-  prompt: Implement semantic selection.
-  review: true
-  review_level: HIGH
-  acceptance:
-    - Existing delete behavior is unchanged
-    - History behavior is unchanged
-    - New tests pass
-```
-
-Reviewer 是一次独立调用，最终必须输出机器可解析的 `PASS` 或 `FAIL`。Reviewer FAIL 会重新进入 Retry / Escalation。
-
-## CLI
+用户可以让项目拆解器：
 
 ```text
-autodev init
-autodev plan
-autodev models
-autodev start
-autodev pause
-autodev resume
-autodev retry <task> [--run]
-autodev status
-autodev handoff
+把这个开发目标拆成阶段和任务，并按难度分配模型档位。
 ```
 
-## 设计原则
+它会输出：
 
-1. **轻量优先**：插件负责调度，不复制完整 AI IDE。
-2. **本地优先**：不要求 VPS、Redis、PostgreSQL 或容器集群。
-3. **真实结果优先**：测试、Git 状态和 Reviewer Gate 高于 AI 的口头完成声明。
-4. **强模型按需使用**：先让合适的便宜模型尝试，失败后再升级。
-5. **状态必须持久化**：可以暂停、恢复、重试、换模型。
-6. **先做可靠闭环，再做复杂 UI 和自动智能**。
+- Stage / Step / Task；
+- 每个 Task 的 `NONE / LOW / MEDIUM / HIGH`；
+- 为什么这样分类；
+- 验收条件；
+- handoff 边界；
+- 失败后应该升级到哪个档位。
+
+## 当前边界
+
+Skill-only Plugin 可以规划和推荐模型档位，但不会假装已经替 ChatGPT 切换当前模型。真正的自动模型切换/调用需要产品原生支持或后续独立执行集成。
 
 ## 路线图
 
-- **V0.1 ✅**：状态机 + YAML 计划 + 单执行器 + CLI 最小闭环
-- **V0.2 ✅**：任务层级 + 多模型路由 + Executor 抽象 + Handoff
-- **V0.3 ✅**：Checker + Reviewer + Retry + 模型升级 + BLOCKED
-- **V0.4**：VS Code 轻量面板
-- **V0.5**：GitHub / Actions / Artifact / Build 工程闭环
-- **V0.6**：手机控制与 GitHub 命令
-- **V1.0**：完整的多模型、可恢复、可验证 AI 开发编排工具
+- **V0.1 ✅**：状态机 + YAML 计划 + CLI 最小闭环
+- **V0.2 ✅**：任务层级 + 多模型路由 + Executor + Handoff
+- **V0.3 ✅**：Checker + Reviewer + Retry + Escalation + BLOCKED
+- **V0.4 🚧**：ChatGPT / Codex Plugin + Skill 化
+- **V0.5**：更强的自动任务拆解与复杂度判断
+- **V0.6**：GitHub Plugin/App 联动与仓库上下文
+- **V0.7**：Context / Handoff 优化
+- **V0.8**：执行集成与真正的多模型自动调用
+- **V1.0**：完整的轻量多模型开发编排插件
 
 ## 文档
 
-- [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) — 完整项目方案
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — 分阶段路线
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 架构与模块边界
-- [`docs/REFERENCES.md`](docs/REFERENCES.md) — 设计借鉴
-- [`docs/V0.1.md`](docs/V0.1.md) — V0.1
-- [`docs/V0.2.md`](docs/V0.2.md) — V0.2
-- [`docs/V0.3.md`](docs/V0.3.md) — V0.3
+- [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)
+- [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- [`docs/REFERENCES.md`](docs/REFERENCES.md)
+- [`docs/V0.1.md`](docs/V0.1.md)
+- [`docs/V0.2.md`](docs/V0.2.md)
+- [`docs/V0.3.md`](docs/V0.3.md)
+- [`docs/V0.4.md`](docs/V0.4.md)
 
 ## 当前状态
 
-**Status: V0.3 complete on `main`.**
-
-GitHub Actions：**21 passed**。
+**V0.4 GPT Plugin 改造进行中：Skill-only plugin skeleton 已建立。**
 
 ---
 
-Dev Task Router 的核心不是“再造一个会写代码的 AI”，而是回答：
+Dev Task Router 最终回答的是：
 
-> **做什么、谁来做、用哪个模型做、怎么证明做完、失败后怎么恢复与升级。**
+> **大项目应该拆成什么任务、每个任务到底有多难、应该直接交给哪个模型，以及失败后应该如何重新判断难度。**
