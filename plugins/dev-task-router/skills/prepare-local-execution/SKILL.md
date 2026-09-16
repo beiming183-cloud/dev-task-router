@@ -89,6 +89,8 @@ A response counts as complete only when a new assistant response is observed and
 
 Response timeout, missing selectors, unreadable UI, or process interruption are infrastructure failures. They must not consume a model retry.
 
+Infrastructure preparation, mode switching, dispatch uncertainty, and response collection failures **must not increment the Task attempt counter**.
+
 `resume` must resume an existing active dispatch only. If there is no active session, it must refuse to create a new send.
 
 ## Objective completion
