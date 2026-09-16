@@ -190,6 +190,12 @@ def _usage_duration(row: dict) -> float | None:
     return None
 
 
+def _usage_token(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
+
+
 class OutcomeCalibrator:
     """Summarize observed routing outcomes without auto-changing routing policy.
 
@@ -276,18 +282,17 @@ class OutcomeCalibrator:
                     bucket["duration_records"] += 1
                     bucket["duration_seconds"] += duration
 
-            in_tok = row.get("input_tokens")
-            out_tok = row.get("output_tokens")
-            has_tokens = isinstance(in_tok, int) or isinstance(out_tok, int)
-            if has_tokens:
+            in_tok = _usage_token(row.get("input_tokens"))
+            out_tok = _usage_token(row.get("output_tokens"))
+            if in_tok is not None or out_tok is not None:
                 token_records += 1
                 if bucket is not None:
                     bucket["token_records"] += 1
-            if isinstance(in_tok, int):
+            if in_tok is not None:
                 input_tokens += in_tok
                 if bucket is not None:
                     bucket["input_tokens"] += in_tok
-            if isinstance(out_tok, int):
+            if out_tok is not None:
                 output_tokens += out_tok
                 if bucket is not None:
                     bucket["output_tokens"] += out_tok
