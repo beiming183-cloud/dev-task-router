@@ -7,84 +7,105 @@
 不要一开始做复杂 UI、服务器、多用户和 Agent Swarm。第一目标是让一个真实任务可以：
 
 ```text
-读取计划 → 选择模型 → 调用执行器 → 修改代码 → 检查结果 → 保存状态 → 继续下一步
+读取计划 → 执行任务 → 检查结果 → 保存状态 → 继续下一步
 ```
 
 ---
 
-## V0.1 — 最小可运行闭环
+## V0.1 — 最小可运行闭环 ✅
 
 ### 目标
 
-证明 Workflow Core 能工作。
+先证明 Workflow Core 能稳定运行，不在第一版同时塞入模型路由、Git 验证和 UI。
 
-### 必做功能
+### 已完成
 
 - `autodev init`
+- `autodev plan`
 - `autodev start`
 - `autodev status`
 - `autodev pause`
 - `autodev resume`
-- Project / Stage / Step / Task 数据模型
-- `plan.yaml`
-- `state.json`
-- 基础状态机
-- 基础 Router：LOW / MEDIUM / HIGH / NONE
-- 单一 Runner
-- Git diff 检查
-- 基础测试命令执行
-- Handoff 文件
+- `.autodev/project.yaml`
+- `.autodev/plan.yaml`
+- `.autodev/state.json`
+- `READY / RUNNING / PAUSED / FAILED / PASSED` 工作流状态
+- `PENDING / RUNNING / FAILED / PASSED` 任务状态
+- 单一 `CommandExecutor`
+- argv 命令执行，不使用 `shell=True`
+- 每个 Task 可配置 `checks`
+- attempts / last_error / started_at / finished_at 持久化
+- plan/state 一致性保护
+- 缺失命令可靠进入 FAILED
+- FAILED 状态不会被 `autodev start` 静默重试
+- pytest 测试集
+- GitHub Actions 项目自身 CI
 
-### 限制
-
-- 只支持一个执行器；
-- LOW / MEDIUM / HIGH 可以暂时映射到同一个真实模型；
-- 不做 VS Code UI；
-- 不做自动复杂度分类；
-- 不做 GitHub Actions。
-
-### 验收标准
-
-至少用一个测试仓库完成：
+### 验证结果
 
 ```text
-Task 1 → 修改 → 检查 → PASS
-Task 2 → 修改 → 测试 → PASS
-中途退出 → resume → 正确继续
+本地 pytest       → 6 passed
+GitHub Actions    → success
+init/start/status → PASSED
 ```
+
+### V0.1 有意不做
+
+- 真正的 LLM / Coding Agent 接入；
+- LOW / MEDIUM / HIGH 实际模型路由；
+- Project / Stage / Step 完整层级；
+- 自动 retry；
+- Reviewer；
+- Git diff Checker；
+- Handoff；
+- VS Code UI；
+- GitHub Actions 作为用户任务执行器。
+
+这些功能不塞进 V0.1，避免第一版范围膨胀。
 
 ---
 
-## V0.2 — 真正的多模型路由
+## V0.2 — 任务层级与真正的多模型路由
 
 ### 目标
 
-开始实际节省强模型额度。
+从“任务能可靠跑”升级到“不同任务能交给不同等级的模型”，开始实际解决 Token / 强模型额度浪费问题。
 
 ### 功能
 
+- Project → Stage → Step → Task 数据层级
 - `models.yaml`
+- `LOW / MEDIUM / HIGH / NONE` 明确枚举
+- 规则 Router
 - 不同等级映射不同模型 / Executor
+- Executor 抽象接口
 - Planner 与 Executor 分离
-- LOW / MEDIUM / HIGH 规则路由
-- 每个 Task 记录实际使用模型
-- 初步 Token / usage 日志
+- Handoff 文件
+- 每个 Task 记录计划模型等级与实际执行器
+- 初步 usage 日志
+- 保持 V0.1 flat task plan 的兼容读取或提供迁移工具
 
 ### 验收标准
 
-同一项目中至少出现：
+同一项目中至少能表达并执行：
 
 ```text
-LOW task → cheap model
-MEDIUM task → medium model
-HIGH task → strong model
+Stage: architecture
+  HIGH task
+
+Stage: implementation
+  MEDIUM task
+  LOW task
+
+Stage: test
+  NONE task
 ```
 
-且切换过程不丢失任务状态。
+并且切换执行器后状态不丢失，重新打开项目后能够继续。
 
 ---
 
-## V0.3 — 验证与重试闭环
+## V0.3 — 验证、重试与模型升级闭环
 
 ### 目标
 
@@ -93,12 +114,14 @@ HIGH task → strong model
 ### 功能
 
 - Checker
+- Git diff 检查
 - Reviewer
 - acceptance criteria
 - Retry
 - 最大重试次数
 - BLOCKED 状态
 - 模型升级机制
+- 失败原因结构化记录
 
 默认升级示例：
 
@@ -110,7 +133,7 @@ MEDIUM fail
 
 ### 验收标准
 
-故意制造错误修改，系统能够识别 FAIL，而不是错误进入 PASSED。
+故意制造错误修改，系统能够识别 FAIL，而不是错误进入 PASSED；超过最大重试次数后进入 BLOCKED。
 
 ---
 
@@ -302,17 +325,15 @@ Task type
 
 # 当前立即开发顺序
 
-建议从以下 10 个任务开始：
+V0.1 已完成。下一阶段按下面顺序进入 V0.2：
 
-1. 建立 Python 包骨架。
-2. 定义 Project / Stage / Step / Task 数据模型。
-3. 定义状态枚举和状态迁移规则。
-4. 实现 `.autodev/` 初始化。
-5. 实现 `plan.yaml` 读取。
-6. 实现规则 Router。
-7. 定义 Runner 抽象接口。
-8. 实现一个 MockRunner。
-9. 实现 Git diff Checker。
-10. 实现 `autodev start / status / resume`。
-
-完成这十步后，再接第一个真实 Coding Agent。
+1. 定义 Project / Stage / Step / Task 层级模型。
+2. 定义 `ModelLevel = NONE / LOW / MEDIUM / HIGH`。
+3. 实现兼容 flat task plan 的层级 Plan Loader。
+4. 建立 `models.yaml`。
+5. 实现 RuleRouter。
+6. 抽象 Executor 接口，并让现有 CommandExecutor 实现它。
+7. 加入 Handoff Writer。
+8. 在 state 中记录 stage / step / requested model / executor。
+9. 增加 Router 与恢复流程测试。
+10. 再接第一个真实模型执行器。
