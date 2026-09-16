@@ -101,9 +101,29 @@ def cmd_calibration(args: argparse.Namespace) -> int:
         print(f"HIGH first-route tasks: {report.high_first_route_count}")
         print(f"HIGH after promotion: {report.high_after_promotion_count}")
         print(f"usage records: {report.usage_record_count}")
-        print(f"token-bearing records: {report.token_record_count}")
+        duration_coverage = report.duration_coverage
+        token_coverage = report.token_coverage
         print(
-            "calibration is descriptive only; routing thresholds are not changed automatically"
+            "duration coverage: "
+            + (f"{duration_coverage:.1%}" if duration_coverage is not None else "no usage data")
+        )
+        print(f"observed execution time: {report.observed_execution_duration_seconds:.3f}s")
+        print(
+            "token coverage: "
+            + (f"{token_coverage:.1%}" if token_coverage is not None else "no usage data")
+        )
+        print(f"reported tokens: input={report.input_tokens}, output={report.output_tokens}")
+        print(f"HIGH manual-review candidates: {len(report.high_manual_review_candidates)}")
+        for candidate in report.high_manual_review_candidates:
+            duration = (
+                f", duration={candidate.duration_seconds:.3f}s"
+                if candidate.duration_seconds is not None
+                else ""
+            )
+            confidence = f", confidence={candidate.confidence}" if candidate.confidence else ""
+            print(f"- {candidate.task_id}{confidence}{duration}: {candidate.evidence}")
+        print(
+            "calibration is descriptive only; one-shot HIGH success does not prove a lower profile would work, and routing thresholds are not changed automatically"
         )
     return 0
 
@@ -156,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     calibration = sub.add_parser(
         "calibration",
-        help="summarize predicted routing levels and observed outcomes without changing policy",
+        help="summarize predicted routing levels, outcomes, time, and reported token usage without changing policy",
     )
     calibration.add_argument("--json", action="store_true")
     calibration.set_defaults(func=cmd_calibration)
