@@ -123,6 +123,13 @@ class DispatchLedger:
     def get(self, dispatch_id: str) -> dict[str, Any] | None:
         return self._load()["entries"].get(dispatch_id)
 
+    def ensure_available(self, dispatch_id: str) -> None:
+        existing = self.get(dispatch_id)
+        if existing and existing.get("status") in {"submitting", "submitted"}:
+            raise RuntimeError(
+                f"duplicate dispatch blocked: {dispatch_id} is already {existing.get('status')}"
+            )
+
     def reserve(self, dispatch_id: str, task_id: str) -> None:
         data = self._load()
         existing = data["entries"].get(dispatch_id)
@@ -320,6 +327,11 @@ class WindowsUIAConversationBackend:
                 f"context pack is {len(prompt)} chars, above local conversation limit {self.config.max_prompt_chars}"
             )
 
+        dispatch_id = self.dispatch_id(envelope)
+        # Duplicate protection must run before touching the UI. A prior submitted or
+        # ambiguous `submitting` record wins even if the composer is currently absent.
+        self.ledger.ensure_available(dispatch_id)
+
         controls = self._controls()
         composer = self._find(
             self.config.composer_labels,
@@ -346,7 +358,8 @@ class WindowsUIAConversationBackend:
         if send_control is None:
             raise RuntimeError("configured ChatGPT send control was not found after composer verification")
 
-        dispatch_id = self.dispatch_id(envelope)
+        # Reservation happens only after the complete prompt has been read back. That
+        # avoids permanently locking a task because of a harmless pre-send UI failure.
         self.ledger.reserve(dispatch_id, envelope.task_id)
         # If this click is ambiguous or the process crashes, the sticky `submitting`
         # record prevents an automatic second send.
