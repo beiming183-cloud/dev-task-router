@@ -337,7 +337,7 @@ business worktree clean
 
 这样不会把未 commit/push 的本地修改误认为 GitHub 已验证事实。
 
-### G. Recovery Skill / 0.9.0 packaging ✅ candidate
+### G. Recovery Skill / 0.9.0 packaging ✅
 
 - Python package metadata → `0.9.0`；
 - Plugin manifest → `0.9.0`；
@@ -345,7 +345,18 @@ business worktree clean
 - `docs/V0.9.md`；
 - Plugin/package regressions 更新。
 
-### H. 仍待 V1.0 readiness / 非 V0.9 自动回归阻塞项
+### H. Automated acceptance ✅ / live calibration ⏸
+
+V0.9 package/Plugin candidate 已完成自动验收：
+
+```text
+branch CI: 127 passed
+PR #9 real refs/pull/9/merge CI: 127 passed
+```
+
+为支持 stacked PR 的真实 merge-ref 验收，直接 base `feature/v0.8-local-loop` 的 CI-only workflow 也已允许 `pull_request` target `feature/**`。V0.9 head 已把该 base commit 纳入 ancestry，最终 compare 状态为 `ahead`、`behind_by=0`。
+
+仍待 V1.0 readiness / 不作为本轮自动验收阻塞项：
 
 - 用户机器真实 ChatGPT Windows selector drift/live calibration；
 - LOW/MEDIUM/HIGH real-profile end-to-end switching；
@@ -353,8 +364,6 @@ business worktree clean
 - 更长期的 predicted difficulty → actual success/failure calibration；
 - usage/token/time metrics 与减少无意义 HIGH；
 - deterministic failure → 自动 materialize debug Task 的完整 UX。
-
-V0.9 core branch 在 packaging/docs 收口前已经达到 **126 passed**；最终 branch + PR merge-ref 数量以最新 CI 为准。
 
 API Provider 仍可作为可选执行层，不强绑 OpenAI；DeepSeek/其他 provider adapter 应保持 vendor-neutral，并且必须配合受控工具/patch/checker，而不是把“调用模型 API”误认为“代码已经修改”。
 
@@ -386,7 +395,7 @@ API Provider 仍可作为可选执行层，不强绑 OpenAI；DeepSeek/其他 pr
 
 # 当前下一步
 
-1. 对 V0.9 `0.9.0` packaging + recovery Skill 跑完整 branch CI。
-2. 创建 stacked Draft PR #9，并跑 PR merge-ref CI。
-3. 审查 V0.9 diff 与 regression logs；自动验收通过后保持 Draft，等待用户以后恢复 Windows 真机校准。
-4. Windows live calibration 暂缓期间，不把 UIA 能力写成 live-verified。
+1. 保持 stacked Draft PR #9，不因自动回归通过而冒充 Windows live validation 已完成。
+2. 用户恢复 Windows 真机校准后，完成 model/effort/composer/Send/response selector 的真实端到端验收。
+3. 基于真实运行证据补 predicted difficulty → actual outcome calibration、usage/token/time metrics，并减少无意义 HIGH。
+4. 收敛 V0.7/V0.8/V0.9 stacked chain，准备 V1.0 正式发布验收。
