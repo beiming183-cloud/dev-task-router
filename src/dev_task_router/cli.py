@@ -42,17 +42,41 @@ def cmd_plan(args: argparse.Namespace) -> int:
 def cmd_start(args: argparse.Namespace) -> int:
     root = project_root(args.root)
     plan = load_plan(root)
-    state = WorkflowEngine(root, plan, StateStore(root)).run()
-    return 0 if state["status"] in {WorkflowStatus.PASSED.value, WorkflowStatus.PAUSED.value} else 1
+    store = StateStore(root)
+    state = store.ensure_for_plan(plan)
+
+    if state["status"] == WorkflowStatus.PASSED.value:
+        print("workflow already passed")
+        return 0
+    if state["status"] == WorkflowStatus.PAUSED.value:
+        print("workflow is paused; use `autodev resume`")
+        return 1
+    if state["status"] == WorkflowStatus.FAILED.value:
+        print("workflow failed; V0.1 does not auto-retry failed tasks")
+        return 1
+    if state["status"] == WorkflowStatus.RUNNING.value:
+        print("workflow is already marked RUNNING; pause it before resuming")
+        return 1
+
+    state = WorkflowEngine(root, plan, store).run()
+    return 0 if state["status"] == WorkflowStatus.PASSED.value else 1
 
 
 def cmd_pause(args: argparse.Namespace) -> int:
     root = project_root(args.root)
     store = StateStore(root)
     state = store.load()
+
     if state["status"] == WorkflowStatus.PASSED.value:
         print("workflow already passed")
         return 0
+    if state["status"] == WorkflowStatus.FAILED.value:
+        print("workflow failed; a failed workflow cannot be paused")
+        return 1
+    if state["status"] == WorkflowStatus.PAUSED.value:
+        print("workflow already paused")
+        return 0
+
     state["status"] = WorkflowStatus.PAUSED.value
     store.save(state)
     print("workflow paused")
@@ -64,16 +88,24 @@ def cmd_resume(args: argparse.Namespace) -> int:
     plan = load_plan(root)
     store = StateStore(root)
     state = store.ensure_for_plan(plan)
+
     if state["status"] == WorkflowStatus.PASSED.value:
         print("workflow already passed")
         return 0
     if state["status"] == WorkflowStatus.FAILED.value:
         print("workflow failed; V0.1 does not auto-retry failed tasks. Fix/reset state before resuming.")
         return 1
+    if state["status"] == WorkflowStatus.READY.value:
+        print("workflow is ready; use `autodev start`")
+        return 1
+    if state["status"] == WorkflowStatus.RUNNING.value:
+        print("workflow is already marked RUNNING; pause it before resuming")
+        return 1
+
     state["status"] = WorkflowStatus.READY.value
     store.save(state)
     result = WorkflowEngine(root, plan, store).run()
-    return 0 if result["status"] in {WorkflowStatus.PASSED.value, WorkflowStatus.PAUSED.value} else 1
+    return 0 if result["status"] == WorkflowStatus.PASSED.value else 1
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -83,10 +115,12 @@ def cmd_status(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(state, ensure_ascii=False, indent=2))
         return 0
+
     print(f"project: {state['project']}")
     print(f"status: {state['status']}")
     if state.get("current_task"):
         print(f"current: {state['current_task']}")
+
     for task_id, task_state in state["tasks"].items():
         marker = {
             TaskStatus.PASSED.value: "✓",
