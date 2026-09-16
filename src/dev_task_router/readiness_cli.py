@@ -6,54 +6,21 @@ import sys
 from pathlib import Path
 
 from .calibration import OutcomeCalibrator
-from .config import load_local_switch, load_plan
-from .conversation_response_ui import load_local_response_config
-from .conversation_ui import WindowsUIAConversationBackend, load_local_conversation_config
+from .config import load_plan
 from .debug_task import DebugTaskMaterializer
-from .mode_switch import WindowsUIAModeSwitchBackend
+from .live_calibration import capture_windows_ui_fingerprint
 from .readiness import V1ReadinessEvaluator
 from .state import StateStore
-from .ui_fingerprint import UIFingerprint, UIFingerprintStore
+from .ui_fingerprint import UIFingerprintStore
 
 
 def project_root(value: str | None) -> Path:
     return Path(value or ".").resolve()
 
 
-def _tracked_labels(root: Path) -> dict[str, tuple[str, ...]]:
-    mode = load_local_switch(root)
-    conversation = load_local_conversation_config(root)
-    response = load_local_response_config(root)
-    tracked: dict[str, tuple[str, ...]] = {
-        "mode.selector": mode.selector_labels,
-        "conversation.composer": conversation.composer_labels,
-        "conversation.send": conversation.send_labels,
-        "response.busy": response.busy_labels,
-    }
-    for prefix, mapping in (
-        ("mode.family", mode.family_labels),
-        ("mode.effort", mode.effort_labels),
-        ("mode.verify", mode.verify_labels),
-    ):
-        for key, labels in mapping.items():
-            tracked[f"{prefix}.{key}"] = labels
-    return {key: value for key, value in tracked.items() if value}
-
-
-def _fingerprint(root: Path) -> UIFingerprint:
-    mode_config = load_local_switch(root)
-    conversation_config = load_local_conversation_config(root)
-    mode_rows = WindowsUIAModeSwitchBackend(mode_config).probe()
-    conversation_rows = WindowsUIAConversationBackend(root, conversation_config).probe()
-    return UIFingerprint.from_rows(
-        {"mode": mode_rows, "conversation": conversation_rows},
-        tracked_labels=_tracked_labels(root),
-    )
-
-
 def cmd_fingerprint(args: argparse.Namespace) -> int:
     root = project_root(args.root)
-    current = _fingerprint(root)
+    current = capture_windows_ui_fingerprint(root)
     store = UIFingerprintStore(root)
     comparison = store.compare(current)
     if args.record:
@@ -143,7 +110,7 @@ def cmd_calibration(args: argparse.Namespace) -> int:
 
 def cmd_readiness(args: argparse.Namespace) -> int:
     root = project_root(args.root)
-    fingerprint = _fingerprint(root).digest if args.probe_ui else None
+    fingerprint = capture_windows_ui_fingerprint(root).digest if args.probe_ui else None
     report = V1ReadinessEvaluator(root).run(current_ui_fingerprint=fingerprint)
     payload = report.to_dict()
     if args.json:
