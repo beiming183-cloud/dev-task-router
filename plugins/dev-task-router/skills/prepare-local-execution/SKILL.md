@@ -68,7 +68,7 @@ current visible ChatGPT window
 + duplicate-dispatch ledger clear
 ```
 
-Do not use fixed screen coordinates. Do not switch to another chat. Do not claim Task completion merely because Send was clicked.
+Do not use fixed screen coordinates. Do not switch to another chat. Do not claim Task completion merely because Send was clicked. The execution layer **must not claim the coding Task has run** until actual response plus objective Checker/Git evidence exists.
 
 A sticky `submitting`/`submitted` dispatch record is safer than automatically sending the same Task twice after an ambiguous crash boundary.
 
@@ -189,6 +189,7 @@ Inspection only:
 ```text
 autodev-local prepare --json
 autodev-local gate --dry-run --json
+autodev-local gate --switch --json
 autodev-local probe-conversation --json
 ```
 
