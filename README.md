@@ -167,7 +167,7 @@ Skill-only Plugin 可以读取已连接 GitHub 工具提供的事实、拆解、
 - **V0.3 ✅**：Checker + Reviewer + Retry + Escalation + BLOCKED
 - **V0.4 ✅**：ChatGPT / Codex Plugin + Skill 化
 - **V0.5 ✅**：内容级复杂度判断 + Surface Router + 模型池配置
-- **V0.6 🚧**：GitHub Plugin/App 联动与真实仓库上下文
+- **V0.6 ✅**：GitHub Plugin/App 联动与真实仓库上下文
 - **V0.7**：Context / Handoff 优化
 - **V0.8**：API / 执行集成，实现真正的多模型自动调用
 - **V1.0**：完整轻量多模型开发编排插件
@@ -187,9 +187,11 @@ Skill-only Plugin 可以读取已连接 GitHub 工具提供的事实、拆解、
 
 ## 当前状态
 
-**V0.6 candidate on `feature/v0.6-github-context`.**
+**V0.6 complete on `main`.**
 
-最新 branch CI：**36 passed**。
+Branch + PR merge-ref 完整回归：**37 passed**。
+
+下一步：**V0.7 Context / Handoff 优化**。
 
 ---
 
