@@ -49,88 +49,79 @@ HIGH failure   → HIGH retry / BLOCKED
 
 ## V0.5 — 内容级复杂度判断 + Surface Router ✅
 
-完成从固定 `kind → level` 到内容级可解释分类的升级。
+完成：
 
-新增：
-
-- `DifficultyClassifier`
-- `DifficultyAssessment`
-- `level / score / confidence / reason / factors / traits`
-- 架构、状态、并发、风险、跨模块、歧义、验证成本等信号
+- `DifficultyClassifier / DifficultyAssessment`
+- 内容级 `level / score / confidence / reason / factors / traits`
+- 架构、状态、并发、风险、跨模块、歧义、验证成本信号
 - “伪简单高风险”识别
 - Task 拆分停止条件
 - `.autodev/surfaces.yaml`
 - `SurfaceCatalog / SurfaceDecision`
-- 新 Skill：`route-model`
+- `route-model` Skill
 - Chat 固定 Surface 映射
 - Codex / Work 可配置模型池
-- 不猜 Lunar / Terra / Sol / Astra 的 family 强弱顺序
+- 不猜 Lunar / Terra / Sol / Astra 强弱顺序
 - Plugin / Python package `0.5.0`
-- `docs/V0.5.md`
-
-当前 Chat 配置：
-
-```text
-LOW    → 5.6 Sol Low
-MEDIUM → 5.6 Sol Medium
-HIGH   → 5.6 Sol High
-```
-
-当前 Codex / Work 只登记可用池：
-
-```text
-families: lunar / terra / sol / astra
-efforts: low / medium / high
-```
-
-如果未配置 family-to-difficulty 映射，保持 `unresolved`，不编造排序。
 
 完整回归：**29 passed**。
 
 ---
 
-## V0.6 — GitHub Plugin/App 联动与真实仓库上下文
+## V0.6 — GitHub Plugin/App 联动与真实仓库上下文 🚧
 
 目标：让分类和拆解不再只依赖用户描述，而是使用真实仓库事实。
 
-计划：
+当前 candidate 已实现：
 
-- repo / branch / commit 上下文；
-- 定位相关文件、模块、测试；
-- 读取 PR / diff / CI；
-- 根据真实影响范围修正 Difficulty；
-- acceptance criteria 对应到真实测试/构建；
-- GitHub 保持为事实来源；
-- 不把整个仓库无差别塞进上下文。
+- `RepositoryContext`
+- `.autodev/repo-context.yaml`
+- `autodev repo-context --import / --json`
+- repo / branch / commit / PR / relevant files / changed files / tests / CI/checks 数据结构
+- safe relative path validation
+- compact repository context budget
+- repository evidence → Difficulty score / confidence / traits
+- broad-scope / cross-module 修正
+- `auth / migration / core-state / public-api / compatibility / persistence / concurrency` 等 verified risk tags
+- failing CI 只对 debugging/review uncertainty 做有限修正
+- workflow / RuleRouter 自动读取 repo context
+- handoff 写入 repository / branch / commit / PR / CI / relevant files / facts
+- 新 Skill：`inspect-repository`
+- `decompose-project / classify-task / create-handoff / index` repository-aware
+- Plugin / Python package `0.6.0`
+- `docs/V0.6.md`
 
-V0.6 重点解决：
+核心原则：
 
 ```text
-用户需求
-↓
-读取真实仓库
-↓
-确定相关范围
-↓
-再拆 Task + 判断 Difficulty
+GitHub evidence = 当前实现事实
+User request    = 目标状态
 ```
+
+不扫描整个仓库；优先 commit-anchored、task-specific evidence。
+
+最新 branch CI：**36 passed**。
+
+V0.6 合并验收：PR CI 继续通过，合并后 main 回归通过，再标记 ✅。
 
 ---
 
 ## V0.7 — Context / Handoff 优化
 
-目标：切模型、切对话时只携带必要上下文。
+目标：切模型、切对话时只携带必要上下文，同时避免证据过旧或重复传输。
 
 计划：
 
-- relevant-files 最小集合；
-- verified facts；
+- relevant-files 最小集合进一步裁剪；
+- verified facts 去重；
 - 不可破坏约束；
 - failure evidence；
 - acceptance criteria；
 - next action；
 - Context Budget；
-- 防止把完整聊天历史和完整仓库反复发送。
+- stale evidence detection；
+- task-specific context packs；
+- 防止完整聊天历史和完整仓库反复发送。
 
 ---
 
@@ -154,7 +145,7 @@ Checker
 Difficulty upward reclassification
 ```
 
-这一阶段才正式接 API / App / MCP 等执行集成。DeepSeek、OpenAI 或其他 Provider 都可以通过 Adapter 接入，不把 Core 锁死在单一厂商。
+这一阶段正式接 API / App / MCP 等执行集成。DeepSeek、OpenAI 或其他 Provider 都可以通过 Adapter 接入，不把 Core 锁死在单一厂商。
 
 ---
 
@@ -171,12 +162,7 @@ Task traits
 → token/cost
 ```
 
-据此降低：
-
-- 简单任务被判成 HIGH；
-- 高风险任务被判成 LOW；
-- 无意义重试；
-- 不必要的高级模型使用。
+据此降低简单任务被判成 HIGH、高风险任务被判成 LOW、无意义重试和不必要高级模型使用。
 
 ---
 
@@ -201,12 +187,10 @@ Task traits
 
 # 当前下一步
 
-V0.5 已完成。进入 **V0.6 GitHub 真实仓库上下文**：
+完成 V0.6 合并验收：
 
-1. 定义最小 Repo Context 数据结构。
-2. 读取 branch / commit / changed files / tests / CI。
-3. 用仓库事实辅助 Task 拆解和 Difficulty 判断。
-4. 只提取相关文件，不扫描/发送整个仓库。
-5. 把 GitHub evidence 写入 acceptance / handoff。
-6. 为 Plugin 增加 repository-aware Skill。
-7. 增加真实 diff / CI / missing-context 回归案例。
+1. PR CI 通过。
+2. 检查 repository-aware diff 是否只携带必要上下文。
+3. squash merge 到 `main`。
+4. main CI 通过后标记 V0.6 ✅。
+5. 然后进入 V0.7 Context / Handoff 优化。
