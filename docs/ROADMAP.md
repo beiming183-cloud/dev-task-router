@@ -2,7 +2,7 @@
 
 ## 总原则
 
-项目主线：**ChatGPT / Codex Plugin + Skills → 内容级难度判断 → Surface 路由 → GitHub 真实上下文 → 同会话精确切换 + Rolling Context → 本地自动执行闭环。**
+项目主线：**ChatGPT / Codex Plugin + Skills → 内容级难度判断 → Surface 路由 → GitHub 真实上下文 → 同会话精确切换 + Rolling Context → 本地自动执行闭环 → recovery / evidence / audit。**
 
 V1.0 前继续保持轻量，不要求自建服务器、数据库集群、VS Code Extension 或 Agent Swarm。
 
@@ -238,26 +238,123 @@ infrastructure failure
 
 `max_cycles` 防止无限运行。
 
-当前自动回归：**89 passed**。这不是 Windows ChatGPT 真机验收，PR #8 仍保持 Draft。
+V0.8 candidate 自动回归达到 **89 passed**。这不是 Windows ChatGPT 真机验收，PR #8 仍保持 Draft。
 
 ---
 
-## V0.9 — Execution Evidence / Recovery / Routing Calibration
+## V0.9 — Execution Evidence / Recovery / Repository Sync 🚧 Draft candidate
 
-下一阶段重点不再是把更多状态塞进同一个 loop，而是解决真实长期运行的证据闭环与恢复质量：
+V0.9 的目标是让 V0.8 的本地执行状态机在真实长期运行中具备**可恢复、可审计、可与远端事实对齐**的能力，而不是通过更激进的自动化掩盖不确定性。
 
-- Windows UI selector drift detection / build fingerprint；
-- composer / response selector recovery；
-- PREPARED ambiguous-send 手工/自动 reconciliation；
-- response/session inspection commands；
-- local worktree vs remote GitHub execution evidence synchronization；
-- commit/PR/CI evidence refresh after Task execution；
-- independent Reviewer execution channel；
-- deterministic failure → explicit debug Task materialization；
-- requested vs actual profile audit；
-- predicted difficulty → actual success/failure calibration；
-- usage / token / time metrics；
-- 减少无意义 HIGH。
+### A. Append-only execution evidence ✅
+
+已实现：
+
+- `.autodev/execution-evidence.jsonl`；
+- compact event，不复制完整 chat history；
+- SHA-256 hash chain；
+- model execution 与 deterministic NONE 都能写 evidence；
+- 幂等 event key，恢复时不重复追加同一边界证据；
+- `autodev-local evidence` 查看/验链。
+
+典型边界：
+
+```text
+PREPARED
+→ SUBMITTED
+→ RESPONSE_COLLECTED
+→ CHECKED
+→ STATE_RECORDED
+```
+
+### B. PREPARED / ambiguous-send reconciliation ✅ code / ⏸ live selector validation
+
+`LocalRecoveryController` 按 durable ordering 保守判断：
+
+```text
+PREPARED + no reservation → SAFE_RETRY
+PREPARED + submitted      → RESUME
+PREPARED + submitting + verified post-baseline activity → RESUME
+PREPARED + submitting + no proof                        → AMBIGUOUS
+```
+
+`AMBIGUOUS` 不会自动 resend。selector/response source 不可用也不会被解释成“肯定没发”。
+
+CLI：
+
+```text
+autodev-local recover --json
+```
+
+### C. Cross-crash-point idempotent recovery ✅
+
+已覆盖：
+
+- response file 已写、session metadata 尚未提交；
+- Checker 已完成、session 尚未推进；
+- workflow terminal state 已持久化、session 仍停在旧状态；
+- 同一 `local_dispatch_id` 重放不会重复增加 attempts/failures/route history。
+
+### D. Execution consistency audit ✅
+
+`autodev-local audit --json` 交叉检查：
+
+- evidence chain；
+- response digest；
+- session ↔ dispatch ledger；
+- workflow `local_dispatch_id` ↔ session/evidence；
+- terminal workflow state ↔ recoverable session state。
+
+可恢复的 write lag 可以是 warning；digest/identity corruption 必须 fail closed。
+
+### E. Independent Reviewer execution boundary ✅
+
+同一个 canonical ChatGPT conversation 不能冒充独立 Reviewer。
+
+自动 Review 只有在显式配置独立外部 reviewer executor 时才能通过 gate。默认 disabled。
+
+语义：
+
+```text
+verified reviewer FAIL → genuine verification failure
+reviewer transport/process/protocol failure → infrastructure failure
+```
+
+基础设施 reviewer failure 不增加新的实现 attempt。
+
+### F. Repository execution evidence synchronization ✅
+
+本地 PASS 不自动移动 `last_commit`。
+
+`autodev-local sync-repository --json` 只有在以下事实同时成立时才推进 repository anchor：
+
+```text
+repo-context commit exists
+CI == success
+local HEAD == repo-context commit
+business worktree clean
+```
+
+这样不会把未 commit/push 的本地修改误认为 GitHub 已验证事实。
+
+### G. Recovery Skill / 0.9.0 packaging ✅ candidate
+
+- Python package metadata → `0.9.0`；
+- Plugin manifest → `0.9.0`；
+- Skill：`recover-execution`；
+- `docs/V0.9.md`；
+- Plugin/package regressions 更新。
+
+### H. 仍待 V1.0 readiness / 非 V0.9 自动回归阻塞项
+
+- 用户机器真实 ChatGPT Windows selector drift/live calibration；
+- LOW/MEDIUM/HIGH real-profile end-to-end switching；
+- composer/Send/assistant-message live selectors；
+- 更长期的 predicted difficulty → actual success/failure calibration；
+- usage/token/time metrics 与减少无意义 HIGH；
+- deterministic failure → 自动 materialize debug Task 的完整 UX。
+
+V0.9 core branch 在 packaging/docs 收口前已经达到 **126 passed**；最终 branch + PR merge-ref 数量以最新 CI 为准。
 
 API Provider 仍可作为可选执行层，不强绑 OpenAI；DeepSeek/其他 provider adapter 应保持 vendor-neutral，并且必须配合受控工具/patch/checker，而不是把“调用模型 API”误认为“代码已经修改”。
 
@@ -276,7 +373,9 @@ API Provider 仍可作为可选执行层，不强绑 OpenAI；DeepSeek/其他 pr
 - GitHub 真实上下文；
 - Rolling Project Context + Task Context Pack；
 - safe submit / response resume；
+- execution evidence / audit / crash recovery；
 - Checker / independent Reviewer / failure reclassification；
+- strict repository anchor sync；
 - deterministic NONE；
 - bounded local continuous execution；
 - pause / resume / recovery。
@@ -287,6 +386,7 @@ API Provider 仍可作为可选执行层，不强绑 OpenAI；DeepSeek/其他 pr
 
 # 当前下一步
 
-1. 保持 PR #7 / #8 Draft，不绕过用户暂缓的 Windows 真机校准。
-2. 对 V0.8 最新 head 跑 branch + PR merge-ref 回归。
-3. 进入 V0.9：优先做 **execution evidence refresh / PREPARED reconciliation / independent reviewer boundary**。
+1. 对 V0.9 `0.9.0` packaging + recovery Skill 跑完整 branch CI。
+2. 创建 stacked Draft PR #9，并跑 PR merge-ref CI。
+3. 审查 V0.9 diff 与 regression logs；自动验收通过后保持 Draft，等待用户以后恢复 Windows 真机校准。
+4. Windows live calibration 暂缓期间，不把 UIA 能力写成 live-verified。
