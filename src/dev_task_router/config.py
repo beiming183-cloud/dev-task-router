@@ -6,6 +6,7 @@ from typing import Any
 import yaml
 
 from .models import Plan
+from .repo_context import RepositoryContext
 from .router import ModelCatalog
 from .surface import SurfaceCatalog
 
@@ -15,6 +16,7 @@ PLAN_FILE = "plan.yaml"
 PROJECT_FILE = "project.yaml"
 MODELS_FILE = "models.yaml"
 SURFACES_FILE = "surfaces.yaml"
+REPO_CONTEXT_FILE = "repo-context.yaml"
 STATE_FILE = "state.json"
 HANDOFF_FILE = "handoff.md"
 USAGE_FILE = "usage.jsonl"
@@ -57,6 +59,23 @@ def load_surfaces(root: Path) -> SurfaceCatalog:
             encoding="utf-8",
         )
     return SurfaceCatalog.from_dict(load_yaml(path))
+
+
+def load_repository_context(root: Path) -> RepositoryContext | None:
+    path = autodev_dir(root) / REPO_CONTEXT_FILE
+    if not path.exists():
+        return None
+    return RepositoryContext.from_dict(load_yaml(path))
+
+
+def save_repository_context(root: Path, context: RepositoryContext) -> Path:
+    path = autodev_dir(root) / REPO_CONTEXT_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump(context.to_dict(), allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    return path
 
 
 def default_models() -> dict[str, Any]:
@@ -171,14 +190,14 @@ def write_default_files(root: Path, project_name: str) -> list[Path]:
                                     "tasks": [
                                         {
                                             "id": "hello",
-                                            "title": "V0.5 smoke task",
+                                            "title": "V0.6 smoke task",
                                             "kind": "test",
                                             "role": "EXECUTOR",
                                             "max_attempts": 1,
                                             "command": [
                                                 "python",
                                                 "-c",
-                                                "print('Dev Task Router V0.5 is running')",
+                                                "print('Dev Task Router V0.6 is running')",
                                             ],
                                             "checks": [],
                                         }
