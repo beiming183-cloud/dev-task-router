@@ -10,6 +10,7 @@ class WorkflowStatus(str, Enum):
     RUNNING = "RUNNING"
     PAUSED = "PAUSED"
     FAILED = "FAILED"
+    BLOCKED = "BLOCKED"
     PASSED = "PASSED"
 
 
@@ -17,6 +18,7 @@ class TaskStatus(str, Enum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     FAILED = "FAILED"
+    BLOCKED = "BLOCKED"
     PASSED = "PASSED"
 
 
@@ -30,6 +32,7 @@ class ModelLevel(str, Enum):
 class TaskRole(str, Enum):
     PLANNER = "PLANNER"
     EXECUTOR = "EXECUTOR"
+    REVIEWER = "REVIEWER"
 
 
 @dataclass(slots=True)
@@ -42,6 +45,12 @@ class TaskSpec:
     level: ModelLevel | None = None
     role: TaskRole = TaskRole.EXECUTOR
     checks: list[list[str]] = field(default_factory=list)
+    acceptance: list[str] = field(default_factory=list)
+    require_diff: bool = False
+    max_attempts: int = 1
+    escalate_after: int = 2
+    review: bool = False
+    review_level: ModelLevel = ModelLevel.HIGH
     stage_id: str = "default"
     step_id: str = "default"
 
@@ -64,6 +73,12 @@ class TaskSpec:
         raw_level = data.get("level", data.get("model"))
         raw_role = str(data.get("role", "EXECUTOR")).strip().upper()
         checks = data.get("checks", [])
+        acceptance = data.get("acceptance", [])
+        require_diff = bool(data.get("require_diff", False))
+        max_attempts = int(data.get("max_attempts", 1))
+        escalate_after = int(data.get("escalate_after", 2))
+        review = bool(data.get("review", False))
+        raw_review_level = str(data.get("review_level", "HIGH")).strip().upper()
 
         if not task_id:
             raise ValueError("task.id cannot be empty")
@@ -81,6 +96,12 @@ class TaskSpec:
             raise ValueError(f"task {task_id}: provide command or prompt")
         if not isinstance(checks, list):
             raise ValueError(f"task {task_id}: checks must be a list")
+        if not isinstance(acceptance, list) or not all(isinstance(x, str) for x in acceptance):
+            raise ValueError(f"task {task_id}: acceptance must be a string list")
+        if max_attempts < 1:
+            raise ValueError(f"task {task_id}: max_attempts must be >= 1")
+        if escalate_after < 1:
+            raise ValueError(f"task {task_id}: escalate_after must be >= 1")
 
         normalized_checks: list[list[str]] = []
         for check in checks:
@@ -99,7 +120,11 @@ class TaskSpec:
         try:
             role = TaskRole(raw_role)
         except ValueError as exc:
-            raise ValueError(f"task {task_id}: role must be PLANNER or EXECUTOR") from exc
+            raise ValueError(f"task {task_id}: role must be PLANNER, EXECUTOR or REVIEWER") from exc
+        try:
+            review_level = ModelLevel(raw_review_level)
+        except ValueError as exc:
+            raise ValueError(f"task {task_id}: review_level must be NONE, LOW, MEDIUM or HIGH") from exc
 
         return cls(
             id=task_id,
@@ -110,6 +135,12 @@ class TaskSpec:
             level=level,
             role=role,
             checks=normalized_checks,
+            acceptance=[item.strip() for item in acceptance if item.strip()],
+            require_diff=require_diff,
+            max_attempts=max_attempts,
+            escalate_after=escalate_after,
+            review=review,
+            review_level=review_level,
             stage_id=stage_id,
             step_id=step_id,
         )
@@ -165,7 +196,7 @@ class Plan:
     project: str
     tasks: list[TaskSpec]
     stages: list[StageSpec] = field(default_factory=list)
-    version: int = 2
+    version: int = 3
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Plan":

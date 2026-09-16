@@ -105,7 +105,7 @@ def write_default_files(root: Path, project_name: str) -> list[Path]:
         plan_path.write_text(
             yaml.safe_dump(
                 {
-                    "version": 2,
+                    "version": 3,
                     "project": project_name,
                     "stages": [
                         {
@@ -118,13 +118,14 @@ def write_default_files(root: Path, project_name: str) -> list[Path]:
                                     "tasks": [
                                         {
                                             "id": "hello",
-                                            "title": "V0.2 smoke task",
+                                            "title": "V0.3 smoke task",
                                             "kind": "test",
                                             "role": "EXECUTOR",
+                                            "max_attempts": 1,
                                             "command": [
                                                 "python",
                                                 "-c",
-                                                "print('Dev Task Router V0.2 is running')",
+                                                "print('Dev Task Router V0.3 is running')",
                                             ],
                                             "checks": [],
                                         }

@@ -25,7 +25,9 @@ class StateStore:
         return {
             "status": TaskStatus.PENDING.value,
             "attempts": 0,
+            "retry_cycles": 0,
             "last_error": None,
+            "last_failure_type": None,
             "started_at": None,
             "finished_at": None,
             "stage": task.stage_id,
@@ -33,11 +35,14 @@ class StateStore:
             "role": task.role.value,
             "kind": task.kind,
             "route": None,
+            "route_history": [],
+            "failures": [],
+            "review": None,
         }
 
     def create(self, plan: Plan) -> dict[str, Any]:
         state = {
-            "version": 2,
+            "version": 3,
             "project": plan.project,
             "status": WorkflowStatus.READY.value,
             "current_task": None,
@@ -70,8 +75,8 @@ class StateStore:
         if expected != actual:
             raise ValueError("plan tasks changed after state creation; remove .autodev/state.json to reinitialize")
 
-        # V0.1 state files remain readable; enrich them in place with V0.2 metadata.
-        state["version"] = 2
+        # V0.1/V0.2 state files remain readable; enrich them in place.
+        state["version"] = 3
         for task in plan.tasks:
             task_state = state["tasks"][task.id]
             task_state["stage"] = task.stage_id
@@ -79,5 +84,28 @@ class StateStore:
             task_state["role"] = task.role.value
             task_state["kind"] = task.kind
             task_state.setdefault("route", None)
+            task_state.setdefault("route_history", [])
+            task_state.setdefault("failures", [])
+            task_state.setdefault("review", None)
+            task_state.setdefault("last_failure_type", None)
+            task_state.setdefault("retry_cycles", 0)
+        self.save(state)
+        return state
+
+    def reset_task(self, plan: Plan, task_id: str) -> dict[str, Any]:
+        state = self.ensure_for_plan(plan)
+        if task_id not in state["tasks"]:
+            raise ValueError(f"unknown task: {task_id}")
+        item = state["tasks"][task_id]
+        item["status"] = TaskStatus.PENDING.value
+        item["attempts"] = 0
+        item["retry_cycles"] = int(item.get("retry_cycles", 0)) + 1
+        item["last_error"] = None
+        item["last_failure_type"] = None
+        item["started_at"] = None
+        item["finished_at"] = None
+        item["review"] = None
+        state["status"] = WorkflowStatus.READY.value
+        state["current_task"] = None
         self.save(state)
         return state

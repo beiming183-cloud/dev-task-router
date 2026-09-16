@@ -43,10 +43,18 @@ def cmd_plan(args: argparse.Namespace) -> int:
     print(f"project: {plan.project}")
     for index, task in enumerate(plan.tasks, 1):
         route = router.route(task)
+        extras: list[str] = []
+        if task.max_attempts > 1:
+            extras.append(f"retry={task.max_attempts}")
+        if task.review:
+            extras.append(f"review={task.review_level.value}")
+        if task.require_diff:
+            extras.append("require_diff")
+        suffix = f" [{' '.join(extras)}]" if extras else ""
         print(
             f"{index}. {task.stage_id}/{task.step_id} [{task.role.value}/{route.level.value}] "
             f"{task.id} - {task.title} -> {route.profile.provider}:{route.profile.model} "
-            f"via {route.profile.executor} ({route.reason})"
+            f"via {route.profile.executor} ({route.reason}){suffix}"
         )
     return 0
 
@@ -70,8 +78,8 @@ def cmd_start(args: argparse.Namespace) -> int:
     if state["status"] == WorkflowStatus.PAUSED.value:
         print("workflow is paused; use `autodev resume`")
         return 1
-    if state["status"] == WorkflowStatus.FAILED.value:
-        print("workflow failed; V0.2 does not auto-retry failed tasks")
+    if state["status"] in {WorkflowStatus.FAILED.value, WorkflowStatus.BLOCKED.value}:
+        print("workflow failed/blocked; inspect it and use `autodev retry <task>`")
         return 1
     if state["status"] == WorkflowStatus.RUNNING.value:
         print("workflow is already marked RUNNING; pause it before resuming")
@@ -89,8 +97,8 @@ def cmd_pause(args: argparse.Namespace) -> int:
     if state["status"] == WorkflowStatus.PASSED.value:
         print("workflow already passed")
         return 0
-    if state["status"] == WorkflowStatus.FAILED.value:
-        print("workflow failed; a failed workflow cannot be paused")
+    if state["status"] in {WorkflowStatus.FAILED.value, WorkflowStatus.BLOCKED.value}:
+        print("workflow failed/blocked; it cannot be paused")
         return 1
     if state["status"] == WorkflowStatus.PAUSED.value:
         print("workflow already paused")
@@ -115,8 +123,8 @@ def cmd_resume(args: argparse.Namespace) -> int:
     if state["status"] == WorkflowStatus.PASSED.value:
         print("workflow already passed")
         return 0
-    if state["status"] == WorkflowStatus.FAILED.value:
-        print("workflow failed; V0.2 does not auto-retry failed tasks. Fix/reset state before resuming.")
+    if state["status"] in {WorkflowStatus.FAILED.value, WorkflowStatus.BLOCKED.value}:
+        print("workflow failed/blocked; use `autodev retry <task>` after inspection")
         return 1
     if state["status"] == WorkflowStatus.READY.value:
         print("workflow is ready; use `autodev start`")
@@ -129,6 +137,25 @@ def cmd_resume(args: argparse.Namespace) -> int:
     store.save(state)
     result = WorkflowEngine(root, plan, store).run()
     return 0 if result["status"] == WorkflowStatus.PASSED.value else 1
+
+
+def cmd_retry(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    plan = load_plan(root)
+    store = StateStore(root)
+    state = store.ensure_for_plan(plan)
+    if args.task not in state["tasks"]:
+        raise ValueError(f"unknown task: {args.task}")
+    current = state["tasks"][args.task]["status"]
+    if current not in {TaskStatus.FAILED.value, TaskStatus.BLOCKED.value}:
+        raise ValueError(f"task {args.task} is {current}; only FAILED/BLOCKED tasks can be retried")
+    store.reset_task(plan, args.task)
+    HandoffWriter(root).write(plan, store.load())
+    print(f"task reset for retry: {args.task}")
+    if args.run:
+        result = WorkflowEngine(root, plan, store).run()
+        return 0 if result["status"] == WorkflowStatus.PASSED.value else 1
+    return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -149,13 +176,17 @@ def cmd_status(args: argparse.Namespace) -> int:
             TaskStatus.PASSED.value: "✓",
             TaskStatus.RUNNING.value: "▶",
             TaskStatus.FAILED.value: "×",
+            TaskStatus.BLOCKED.value: "!",
             TaskStatus.PENDING.value: "○",
         }.get(task_state["status"], "?")
         route = task_state.get("route") or {}
         route_text = f" {route.get('level')}:{route.get('model')}" if route else ""
+        failure = task_state.get("last_failure_type")
+        failure_text = f" failure={failure}" if failure else ""
         print(
             f"{marker} {task_state.get('stage', 'default')}/{task_state.get('step', 'default')}/"
-            f"{task_id}: {task_state['status']}{route_text} (attempts={task_state['attempts']})"
+            f"{task_id}: {task_state['status']}{route_text} "
+            f"(attempts={task_state['attempts']}{failure_text})"
         )
     return 0
 
@@ -170,7 +201,7 @@ def cmd_handoff(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="autodev", description="Dev Task Router V0.2")
+    parser = argparse.ArgumentParser(prog="autodev", description="Dev Task Router V0.3")
     parser.add_argument("--root", help="project root; defaults to current directory")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -184,6 +215,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("pause", help="pause before the next task").set_defaults(func=cmd_pause)
     sub.add_parser("resume", help="resume a paused workflow").set_defaults(func=cmd_resume)
     sub.add_parser("handoff", help="regenerate handoff.md").set_defaults(func=cmd_handoff)
+
+    retry_parser = sub.add_parser("retry", help="reset one FAILED/BLOCKED task")
+    retry_parser.add_argument("task", help="task id")
+    retry_parser.add_argument("--run", action="store_true", help="run workflow immediately after reset")
+    retry_parser.set_defaults(func=cmd_retry)
 
     status_parser = sub.add_parser("status", help="show workflow state")
     status_parser.add_argument("--json", action="store_true", help="print raw state JSON")

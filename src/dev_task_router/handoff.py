@@ -32,8 +32,8 @@ class HandoffWriter:
             "",
             "## Tasks",
             "",
-            "| Stage | Step | Role | Task | Status | Route |",
-            "| --- | --- | --- | --- | --- | --- |",
+            "| Stage | Step | Role | Task | Status | Attempts | Route | Last failure |",
+            "| --- | --- | --- | --- | --- | ---: | --- | --- |",
         ]
         for task in plan.tasks:
             item = state["tasks"][task.id]
@@ -44,9 +44,14 @@ class HandoffWriter:
                     f"{route.get('level')} / {route.get('provider')}:{route.get('model')} "
                     f"via {route.get('executor')}"
                 )
+            failure_type = item.get("last_failure_type") or "-"
+            failure_message = (item.get("last_error") or "-").replace("|", "\\|").replace("\n", " ")
+            if len(failure_message) > 120:
+                failure_message = failure_message[:117] + "..."
+            failure_text = failure_type if failure_message == "-" else f"{failure_type}: {failure_message}"
             lines.append(
                 f"| {task.stage_id} | {task.step_id} | {task.role.value} | {task.id} | "
-                f"{item['status']} | {route_text} |"
+                f"{item['status']} | {item.get('attempts', 0)} | {route_text} | {failure_text} |"
             )
         lines.extend(
             [
@@ -54,6 +59,7 @@ class HandoffWriter:
                 "## Resume rule",
                 "",
                 "Read this file plus the relevant task files; do not replay old chat history.",
+                "If the workflow is FAILED/BLOCKED, inspect the last failure before using `autodev retry <task>`.",
                 "",
             ]
         )
