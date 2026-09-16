@@ -5,8 +5,10 @@ from typing import Any
 
 import yaml
 
+from .mode_switch import LocalSwitchConfig
 from .models import Plan
 from .repo_context import RepositoryContext
+from .rolling_context import RollingProjectContext
 from .router import ModelCatalog
 from .surface import SurfaceCatalog
 
@@ -17,6 +19,8 @@ PROJECT_FILE = "project.yaml"
 MODELS_FILE = "models.yaml"
 SURFACES_FILE = "surfaces.yaml"
 REPO_CONTEXT_FILE = "repo-context.yaml"
+ROLLING_CONTEXT_FILE = "context.yaml"
+LOCAL_SWITCH_FILE = "local-switch.yaml"
 STATE_FILE = "state.json"
 HANDOFF_FILE = "handoff.md"
 USAGE_FILE = "usage.jsonl"
@@ -76,6 +80,41 @@ def save_repository_context(root: Path, context: RepositoryContext) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def load_rolling_context(root: Path, *, project: str | None = None) -> RollingProjectContext:
+    path = autodev_dir(root) / ROLLING_CONTEXT_FILE
+    if not path.exists():
+        if project is None:
+            project = load_plan(root).project
+        context = RollingProjectContext.empty(project)
+        save_rolling_context(root, context)
+        return context
+    context = RollingProjectContext.from_dict(load_yaml(path))
+    if project is not None and context.project != project:
+        raise ValueError("rolling context project does not match plan project")
+    return context
+
+
+def save_rolling_context(root: Path, context: RollingProjectContext) -> Path:
+    path = autodev_dir(root) / ROLLING_CONTEXT_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump(context.to_dict(), allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    return path
+
+
+def load_local_switch(root: Path) -> LocalSwitchConfig:
+    path = autodev_dir(root) / LOCAL_SWITCH_FILE
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            yaml.safe_dump(default_local_switch(), allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+    return LocalSwitchConfig.from_dict(load_yaml(path))
 
 
 def default_models() -> dict[str, Any]:
@@ -138,6 +177,38 @@ def default_surfaces() -> dict[str, Any]:
     }
 
 
+def default_local_switch() -> dict[str, Any]:
+    """Safe-by-default local UIA profile.
+
+    `mode probe` works before calibration. Exact switching stays disabled until
+    the user's actual ChatGPT accessibility labels have been inspected.
+    """
+    return {
+        "version": 1,
+        "enabled": False,
+        "backend": "windows-uia",
+        "window": {
+            "title_regex": ".*ChatGPT.*",
+        },
+        "selector": {
+            "open_labels": [],
+        },
+        "family_labels": {
+            "sol": [],
+        },
+        "effort_labels": {
+            "low": [],
+            "medium": [],
+            "high": [],
+        },
+        "verify_labels": {
+            "low": [],
+            "medium": [],
+            "high": [],
+        },
+    }
+
+
 def write_default_files(root: Path, project_name: str) -> list[Path]:
     target = autodev_dir(root)
     target.mkdir(parents=True, exist_ok=True)
@@ -146,6 +217,8 @@ def write_default_files(root: Path, project_name: str) -> list[Path]:
     plan_path = target / PLAN_FILE
     models_path = target / MODELS_FILE
     surfaces_path = target / SURFACES_FILE
+    context_path = target / ROLLING_CONTEXT_FILE
+    local_switch_path = target / LOCAL_SWITCH_FILE
 
     if not project_path.exists():
         project_path.write_text(
@@ -173,6 +246,22 @@ def write_default_files(root: Path, project_name: str) -> list[Path]:
             encoding="utf-8",
         )
 
+    if not context_path.exists():
+        context_path.write_text(
+            yaml.safe_dump(
+                RollingProjectContext.empty(project_name).to_dict(),
+                allow_unicode=True,
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+
+    if not local_switch_path.exists():
+        local_switch_path.write_text(
+            yaml.safe_dump(default_local_switch(), allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+
     if not plan_path.exists():
         plan_path.write_text(
             yaml.safe_dump(
@@ -190,14 +279,14 @@ def write_default_files(root: Path, project_name: str) -> list[Path]:
                                     "tasks": [
                                         {
                                             "id": "hello",
-                                            "title": "V0.6 smoke task",
+                                            "title": "V0.7 smoke task",
                                             "kind": "test",
                                             "role": "EXECUTOR",
                                             "max_attempts": 1,
                                             "command": [
                                                 "python",
                                                 "-c",
-                                                "print('Dev Task Router V0.6 is running')",
+                                                "print('Dev Task Router V0.7 is running')",
                                             ],
                                             "checks": [],
                                         }
@@ -213,4 +302,4 @@ def write_default_files(root: Path, project_name: str) -> list[Path]:
             encoding="utf-8",
         )
 
-    return [project_path, plan_path, models_path, surfaces_path]
+    return [project_path, plan_path, models_path, surfaces_path, context_path, local_switch_path]

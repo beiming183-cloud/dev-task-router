@@ -11,12 +11,15 @@ from .config import (
     load_models,
     load_plan,
     load_repository_context,
+    load_rolling_context,
     save_repository_context,
+    save_rolling_context,
     write_default_files,
 )
 from .handoff import HandoffWriter
 from .models import TaskStatus, WorkflowStatus
 from .repo_context import RepositoryContext
+from .rolling_context import ContextPackBuilder, RollingProjectContext
 from .router import RuleRouter
 from .state import StateStore
 from .workflow import WorkflowEngine
@@ -24,6 +27,20 @@ from .workflow import WorkflowEngine
 
 def project_root(value: str | None) -> Path:
     return Path(value or ".").resolve()
+
+
+def _read_mapping(path_text: str) -> dict:
+    source = Path(path_text).expanduser().resolve()
+    if not source.exists():
+        raise FileNotFoundError(source)
+    text = source.read_text(encoding="utf-8")
+    if source.suffix.lower() == ".json":
+        data = json.loads(text)
+    else:
+        data = yaml.safe_load(text)
+    if not isinstance(data, dict):
+        raise ValueError(f"{source} must contain a mapping")
+    return data
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -82,17 +99,7 @@ def cmd_models(args: argparse.Namespace) -> int:
 def cmd_repo_context(args: argparse.Namespace) -> int:
     root = project_root(args.root)
     if args.import_file:
-        source = Path(args.import_file).expanduser().resolve()
-        if not source.exists():
-            raise FileNotFoundError(source)
-        text = source.read_text(encoding="utf-8")
-        if source.suffix.lower() == ".json":
-            data = json.loads(text)
-        else:
-            data = yaml.safe_load(text)
-        if not isinstance(data, dict):
-            raise ValueError("repository context input must contain a mapping")
-        context = RepositoryContext.from_dict(data)
+        context = RepositoryContext.from_dict(_read_mapping(args.import_file))
         path = save_repository_context(root, context)
         print(f"saved repository context: {path.relative_to(root)}")
         return 0
@@ -112,6 +119,70 @@ def cmd_repo_context(args: argparse.Namespace) -> int:
     print(f"relevant files: {len(context.all_files)}")
     if context.evidence_tags:
         print(f"tags: {', '.join(context.evidence_tags)}")
+    return 0
+
+
+def cmd_context(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    plan = load_plan(root)
+    if args.import_file:
+        context = RollingProjectContext.from_dict(_read_mapping(args.import_file))
+        if context.project != plan.project:
+            raise ValueError("rolling context project does not match plan project")
+        path = save_rolling_context(root, context)
+        print(f"saved rolling context: {path.relative_to(root)}")
+        return 0
+
+    context = load_rolling_context(root, project=plan.project)
+    repo = load_repository_context(root)
+    if args.json:
+        data = context.to_dict()
+        data["stale_against_repository"] = context.is_stale_against(repo)
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0
+    print(f"project: {context.project}")
+    print(f"goal: {context.goal or 'unset'}")
+    print(f"decisions: {len(context.decisions)}")
+    print(f"constraints: {len(context.constraints)}")
+    print(f"stage notes: {sum(len(v) for v in context.stage_notes.values())}")
+    print(f"task notes: {sum(len(v) for v in context.task_notes.values())}")
+    print(f"last commit: {context.last_commit or 'unanchored'}")
+    print(f"stale: {'yes' if context.is_stale_against(repo) else 'no'}")
+    return 0
+
+
+def cmd_context_pack(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    plan = load_plan(root)
+    by_id = {task.id: task for task in plan.tasks}
+    if args.task not in by_id:
+        raise ValueError(f"unknown task: {args.task}")
+    task = by_id[args.task]
+    store = StateStore(root)
+    state = store.ensure_for_plan(plan)
+    repo = load_repository_context(root)
+    rolling = load_rolling_context(root, project=plan.project)
+    route = RuleRouter(load_models(root), repository_context=repo).route(task)
+    requested_route = {
+        "level": route.level.value,
+        "provider": route.profile.provider,
+        "model": route.profile.model,
+        "executor": route.profile.executor,
+        "reason": route.reason,
+        "confidence": route.confidence,
+    }
+    pack = ContextPackBuilder().build(
+        plan,
+        state,
+        task,
+        rolling,
+        repository=repo,
+        requested_route=requested_route,
+    )
+    if args.json:
+        print(json.dumps(pack.to_dict(), ensure_ascii=False, indent=2))
+    else:
+        print(pack.to_markdown(), end="")
     return 0
 
 
@@ -250,7 +321,7 @@ def cmd_handoff(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="autodev", description="Dev Task Router V0.6")
+    parser = argparse.ArgumentParser(prog="autodev", description="Dev Task Router V0.7")
     parser.add_argument("--root", help="project root; defaults to current directory")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -269,6 +340,16 @@ def build_parser() -> argparse.ArgumentParser:
     repo_parser.add_argument("--import", dest="import_file", help="import YAML/JSON repository evidence")
     repo_parser.add_argument("--json", action="store_true", help="print raw context JSON")
     repo_parser.set_defaults(func=cmd_repo_context)
+
+    context_parser = sub.add_parser("context", help="show or import rolling project context")
+    context_parser.add_argument("--import", dest="import_file", help="import YAML/JSON rolling context")
+    context_parser.add_argument("--json", action="store_true", help="print raw context JSON")
+    context_parser.set_defaults(func=cmd_context)
+
+    pack_parser = sub.add_parser("context-pack", help="build a budgeted context pack for one task")
+    pack_parser.add_argument("task", help="task id")
+    pack_parser.add_argument("--json", action="store_true", help="print context pack JSON")
+    pack_parser.set_defaults(func=cmd_context_pack)
 
     retry_parser = sub.add_parser("retry", help="reset one FAILED/BLOCKED task")
     retry_parser.add_argument("task", help="task id")

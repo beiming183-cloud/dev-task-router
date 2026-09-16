@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dev-task-router"
-version = "0.6.0"
-description = "Lightweight repository-aware task decomposition, difficulty classification, and model-surface routing for AI-assisted development"
+version = "0.7.0"
+description = "Repository-aware task decomposition, routing, and local exact ChatGPT mode switching for AI-assisted development"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -14,9 +14,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+local = ["pywinauto>=0.6.8"]
 
 [project.scripts]
 autodev = "dev_task_router.cli:main"
+autodev-mode = "dev_task_router.local_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

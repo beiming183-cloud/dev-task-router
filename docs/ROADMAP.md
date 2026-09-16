@@ -2,9 +2,11 @@
 
 ## 总原则
 
-项目主线：**ChatGPT / Codex Plugin + Skills → 内容级难度判断 → Surface 路由 → GitHub 真实上下文 → Context 优化 → 执行集成。**
+项目主线：**ChatGPT / Codex Plugin + Skills → 内容级难度判断 → Surface 路由 → GitHub 真实上下文 → 同会话精确切换 + Rolling Context → 本地自动执行闭环。**
 
 V1.0 前继续保持轻量，不要求自建服务器、数据库集群、VS Code Extension 或 Agent Swarm。
+
+核心产品约束：**Task decomposition 不等于 conversation decomposition。** 复杂项目默认保持一个 canonical conversation；简单 Task 用低推理，复杂 Task 用高推理，优先在同一会话原地切换 execution profile。
 
 ---
 
@@ -20,8 +22,6 @@ V1.0 前继续保持轻量，不要求自建服务器、数据库集群、VS Cod
 
 完成 Checker、Reviewer、Retry、Escalation、BLOCKED、失败历史和人工 retry。
 
-核心升级语义：
-
 ```text
 LOW failure    → MEDIUM
 MEDIUM failure → HIGH
@@ -34,14 +34,7 @@ HIGH failure   → HIGH retry / BLOCKED
 
 ## V0.4 — ChatGPT / Codex Plugin + Skill 化 ✅
 
-完成：
-
-- `.agents/plugins/marketplace.json`
-- `plugins/dev-task-router/.codex-plugin/plugin.json`
-- Skill-only Plugin
-- `index / decompose-project / classify-task / create-handoff`
-- Plugin package 回归测试
-- Python package `0.4.0`
+完成 Skill-only Plugin、marketplace、Plugin package 回归测试和 Python package `0.4.0`。
 
 验证：**23 passed**。
 
@@ -49,46 +42,17 @@ HIGH failure   → HIGH retry / BLOCKED
 
 ## V0.5 — 内容级复杂度判断 + Surface Router ✅
 
-完成：
+完成 `DifficultyClassifier / DifficultyAssessment`、Task 拆分停止条件、`SurfaceCatalog / SurfaceDecision`、`route-model` Skill，以及 Chat / Codex / Work 的分层路由配置。
 
-- `DifficultyClassifier / DifficultyAssessment`
-- 内容级 `level / score / confidence / reason / factors / traits`
-- 架构、状态、并发、风险、跨模块、歧义、验证成本信号
-- “伪简单高风险”识别
-- Task 拆分停止条件
-- `.autodev/surfaces.yaml`
-- `SurfaceCatalog / SurfaceDecision`
-- `route-model` Skill
-- Chat 固定 Surface 映射
-- Codex / Work 可配置模型池
-- 不猜 Lunar / Terra / Sol / Astra 强弱顺序
-- Plugin / Python package `0.5.0`
+不猜 Lunar / Terra / Sol / Astra 强弱顺序。
 
 完整回归：**29 passed**。
 
 ---
 
-## V0.6 — GitHub Plugin/App 联动与真实仓库上下文 ✅
+## V0.6 — GitHub 真实仓库上下文 ✅
 
-完成：
-
-- `RepositoryContext`
-- `.autodev/repo-context.yaml`
-- `autodev repo-context --import / --json`
-- repo / branch / commit / PR / relevant files / changed files / tests / CI/checks 数据结构
-- safe relative path validation
-- compact repository context budget
-- repository evidence → Difficulty score / confidence / traits
-- broad-scope / cross-module 修正
-- `auth / migration / core-state / public-api / compatibility / persistence / concurrency` 等 verified risk tags
-- failing CI 只对 debugging/review uncertainty 做有限修正
-- workflow / RuleRouter 自动读取 repo context
-- handoff 写入 repository / branch / commit / PR / CI / relevant files / facts
-- 新 Skill：`inspect-repository`
-- `decompose-project / classify-task / create-handoff / index` repository-aware
-- 测试文件不计入业务 module_count，避免虚假跨模块升级
-- Plugin / Python package `0.6.0`
-- `docs/V0.6.md`
+完成 `RepositoryContext`、repo/branch/commit/PR/diff/test/CI evidence、repository-aware Difficulty、commit-anchored handoff、`inspect-repository` Skill，以及测试文件不计入业务 module_count 的误判修复。
 
 核心原则：
 
@@ -97,73 +61,166 @@ GitHub evidence = 当前实现事实
 User request    = 目标状态
 ```
 
-不扫描整个仓库；优先 commit-anchored、task-specific evidence。
-
 验证：branch CI + PR merge-ref CI 均通过，完整回归 **37 passed**。PR #6 已 squash merge 到 `main`。
 
 ---
 
-## V0.7 — Context / Handoff 优化 🚧
+## V0.7 — Same-Conversation Foundation 🚧
 
-目标：切模型、切对话、切执行阶段时只携带必要上下文，同时避免证据过旧、重复发送或上下文越滚越大。
+目标：让一个复杂项目长期保持**同一个 canonical ChatGPT conversation**，同时解决两个问题：
+
+```text
+不同 Task 需要不同 reasoning profile
++
+同一聊天窗口不可能无限承载全部历史细节
+```
+
+### A. Local Exact Mode Switch
+
+当前 candidate 已实现：
+
+- `RequestedProfile`
+- `SwitchResult`
+- `ModeSwitchController`
+- `ModeSwitchBackend` 协议
+- `DryRunModeSwitchBackend`
+- `WindowsUIAModeSwitchBackend`
+- `.autodev/local-switch.yaml`
+- `autodev-mode probe`
+- `autodev-mode switch LOW|MEDIUM|HIGH`
+- `requested` / `actual` profile 分离
+- Windows UI Automation/accessibility 驱动
+- 禁止固定屏幕坐标
+- selector / family / effort / verify labels 全部配置化
+- 默认禁用，必须先校准
+- UI 动作后无法验证则返回失败，不声称已经切换
+- 模式切换失败属于 `MODE_SWITCH`/执行基础设施问题，不触发 Difficulty 上调
+- Skill：`switch-local-mode`
+- optional dependency：`pywinauto`
+
+本地验收流程：
+
+```text
+打开 canonical ChatGPT conversation
+↓
+autodev-mode probe --json
+↓
+校准 .autodev/local-switch.yaml
+↓
+分别验证 LOW / MEDIUM / HIGH
+↓
+每次必须 verified: true
+```
+
+Windows 真机校准由用户暂缓，因此 PR #7 保持 Draft；其余自动可验证开发继续推进。
+
+### B. Rolling Project Context / Task Context Pack
+
+已实现：
+
+- `.autodev/context.yaml`
+- `RollingProjectContext`
+- `ContextBudget`
+- `TaskContextPack`
+- `ContextPackBuilder`
+- project goal / decisions / constraints / stage notes / task notes
+- 字符串归一化去重
+- commit-anchor stale detection
+- repository files / facts / CI 的预算化选择
+- recent failure evidence budget
+- acceptance budget
+- requested execution profile 写入 pack
+- `autodev context`
+- `autodev context --import`
+- `autodev context-pack <task>`
+- handoff 改成 **Next Task Context Pack first**
+- PASSED 历史任务不反复占据 handoff
+- unresolved ledger 最多展示 10 个 Task
+- Skill：`build-context-pack`
+
+核心链路：
+
+```text
+same canonical conversation
+↓
+rolling project context
++
+current task-specific repository evidence
+↓
+Task Context Pack
+↓
+requested reasoning profile
+↓
+local exact switch
+↓ verified
+execute Task
+```
+
+Context Pack 的目的不是换窗口，而是让同一个长窗口在项目持续很久后仍有一个小而准确的工作集。
+
+---
+
+## V0.8 — 本地自动执行闭环
+
+目标：把目前已经存在的“拆解 / 分类 / Context Pack / Mode Switch / Checker”串成自动状态机，而不是要求用户逐条手动执行 CLI。
 
 计划：
 
-- relevant-files 最小集合进一步裁剪；
-- verified facts 去重与 provenance；
-- 不可破坏约束单独持久化；
-- failure evidence 压缩；
-- acceptance criteria 精简；
-- exact next action；
-- Context Budget；
-- stale evidence detection；
-- task-specific context packs；
-- repository context 与 task context 分层；
-- 防止完整聊天历史和完整仓库反复发送；
-- handoff 可比较/可更新，不每次整份重建。
+- `LocalConversationExecutor` 抽象；
+- Task Ready 时自动生成 Context Pack；
+- 自动请求目标 profile；
+- `verified: true` 后才允许发送 Task；
+- 把 Task prompt + Context Pack 送入当前 canonical conversation；
+- 等待执行结果；
+- 收集 result / diff / test / CI；
+- 更新 workflow state；
+- 只把 durable information 写回 Rolling Context；
+- Task 成功后自动进入下一 Task；
+- 真正 Task failure 才做 `LOW → MEDIUM → HIGH`；
+- Mode/UI/permission/network failure 不升级 Difficulty；
+- pause / resume / recovery；
+- 用户可设置最大连续 Task 数和人工确认边界。
 
-验收方向：在保留任务正确性和关键约束的前提下，同一项目跨任务传递的上下文明显小于“整段聊天 + 整个仓库摘要”。
+```text
+Task Ready
+↓
+Context Pack
+↓
+Difficulty / Route
+↓
+ModeSwitchController
+↓ verified
+Current ChatGPT Conversation
+↓
+Task execution
+↓
+Checker / Reviewer / GitHub evidence
+↓
+Rolling Context update
+↓
+Next Task
+```
+
+API Provider 仍可作为以后可选辅助层，但不是当前主路线；云端 exact switching 暂不作为 V0.8 阻塞项。
 
 ---
 
-## V0.8 — 真正的多模型执行
+## V0.9 — 稳定性、恢复与成本校准
 
-目标：在产品支持或独立执行层允许时，让 Surface Route 真正调用模型。
+目标：让本地长时间运行更可靠，并逐步校准“哪些 Task 真正需要更高 reasoning”。
 
-```text
-Task
-↓
-Difficulty classifier
-↓
-Surface router
-↓
-具体模型 / reasoning effort
-↓
-Executor
-↓
-Checker
-↓ fail
-Difficulty upward reclassification
-```
+计划：
 
-这一阶段正式接 API / App / MCP 等执行集成。DeepSeek、OpenAI 或其他 Provider 都可以通过 Adapter 接入，不把 Core 锁死在单一厂商。
-
----
-
-## V0.9 — 成本与自适应校准
-
-记录：
-
-```text
-Task traits
-→ predicted difficulty
-→ surface/model
-→ success/fail
-→ promotion
-→ token/cost
-```
-
-据此降低简单任务被判成 HIGH、高风险任务被判成 LOW、无意义重试和不必要高级模型使用。
+- mode-switch selector drift detection；
+- ChatGPT UI change recovery；
+- stuck-task timeout；
+- duplicate-send protection；
+- execution lease / idempotency；
+- crash recovery；
+- requested vs actual profile audit；
+- predicted difficulty → actual success/failure 统计；
+- 减少无意义 HIGH；
+- usage / token / time 指标。
 
 ---
 
@@ -171,29 +228,24 @@ Task traits
 
 目标能力：
 
-- ChatGPT / Codex Plugin；
+- 一个复杂项目对应一个 canonical conversation；
 - Project / Stage / Step / Task；
 - 自动内容级难度分类；
-- Surface-aware model routing；
-- 失败后 upward reclassification；
-- Checker / Reviewer；
+- Surface-aware routing；
+- Windows 本地 exact mode switching；
+- requested/actual profile 验证；
 - GitHub 真实上下文；
-- Compact Handoff；
-- 可选多 Provider 执行集成；
-- Token / 成本统计。
+- Rolling Project Context + Task Context Pack；
+- Checker / Reviewer / failure reclassification；
+- 本地自动执行闭环；
+- pause / resume / recovery。
 
-不作为 V1.0 阻塞项：自建服务器、多用户、VS Code UI、Agent Swarm、企业协作平台。
+不作为 V1.0 阻塞项：云端 exact mode switch、自建服务器、多用户、VS Code UI、Agent Swarm。
 
 ---
 
 # 当前下一步
 
-进入 **V0.7 Context / Handoff 优化**：
+V0.7 自动部分继续完成回归；Windows 真机校准暂缓。
 
-1. 定义 Task Context Pack schema。
-2. 对 relevant files / facts / constraints / failures 设置独立预算。
-3. 增加 stale evidence 检测。
-4. 增加 context 去重和增量更新。
-5. 让 handoff 只携带下一 Task 真正需要的内容。
-6. 增加跨多 Task 的 context-size 回归测试。
-7. CI 通过后合并 V0.7。
+随后进入 **V0.8 本地自动执行闭环**：先实现 `Task Ready → Context Pack → requested profile → switch gate` 的执行契约，再接真正的当前 ChatGPT conversation 驱动。

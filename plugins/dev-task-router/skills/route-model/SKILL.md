@@ -9,7 +9,7 @@ Follow `../index/SKILL.md` first.
 
 ## Core rule
 
-Use two separate decisions:
+Use separate decisions:
 
 ```text
 Task content
@@ -20,18 +20,16 @@ NONE / LOW / MEDIUM / HIGH
   ↓
 Current surface
   ↓
-Surface-specific model / effort
+requested model / effort
+  ↓
+local exact switch when available
 ```
 
 Do not change task difficulty just because a different surface exposes different model names.
 
-## Current surface model shape
+## Chat
 
-The user's current environment has these planning assumptions:
-
-### Chat
-
-Chat uses the Sol family with three reasoning efforts:
+Current project mapping:
 
 ```text
 LOW    → 5.6 Sol Low
@@ -41,9 +39,13 @@ HIGH   → 5.6 Sol High
 
 Treat this as a configurable surface mapping, not as part of the difficulty definition.
 
-### Codex / Work
+When the project is running locally on Windows and the local companion is calibrated, a resolved Chat route should be passed to `switch-local-mode` **without opening a new conversation**.
 
-Codex and Work expose a broader pool containing the families:
+The router's output is only the requested profile. The mode switch is not complete until the local companion reports the matching actual profile with `verified: true`.
+
+## Codex / Work
+
+Codex and Work expose a broader pool containing:
 
 ```text
 lunar
@@ -62,7 +64,7 @@ high
 
 Do not invent an ordering such as `lunar < terra < sol < astra` unless the user or current product configuration explicitly provides that ordering.
 
-If no family-to-difficulty policy is configured, output the classified difficulty plus the available pool and mark model-family selection as unresolved.
+If no family-to-difficulty policy is configured, output the classified difficulty plus the available pool and mark model-family selection as unresolved. An unresolved route must not be sent to the local switcher.
 
 ## Failure handling
 
@@ -74,9 +76,9 @@ MEDIUM failure → HIGH
 HIGH failure   → HIGH retry / BLOCKED
 ```
 
-After the difficulty is updated, run the surface mapping again.
+After difficulty changes, run the surface mapping again.
 
-Infrastructure failures such as missing credentials, unavailable tools, network failures, permissions, or rate limits do not change task difficulty.
+A mode-switch failure is different. If the local UI selector is missing, ChatGPT is not open, accessibility access fails, or actual profile verification fails, keep the same Difficulty and report `MODE_SWITCH` instead of promoting the coding task.
 
 ## Output
 
@@ -86,8 +88,17 @@ Return:
 Surface: chat | codex | work | <other>
 Difficulty: NONE | LOW | MEDIUM | HIGH
 Route status: resolved | unresolved
-Model family: <family or unresolved>
-Effort: <low/medium/high or unresolved>
-Reason: <why this surface mapping was selected>
+Requested model family: <family or unresolved>
+Requested effort: <low/medium/high or unresolved>
+Mode enforcement: local_exact | unresolved | none
+Reason: <why this mapping was selected>
 Candidate pool: <only when unresolved>
+```
+
+When a local exact switch is attempted, append:
+
+```text
+Actual model family: <family or unknown>
+Actual effort: <effort or unknown>
+Verified: true | false
 ```
