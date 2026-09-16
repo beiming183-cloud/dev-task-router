@@ -6,8 +6,9 @@ from pathlib import Path
 from .config import load_local_switch, load_plan, load_surfaces
 from .conversation_response_ui import load_local_response_config
 from .conversation_ui import load_local_conversation_config
+from .e2e_calibration import EndToEndCalibrationRecorder
 from .execution_audit import LocalExecutionAuditor
-from .models import ModelLevel
+from .models import ModelLevel, Plan, TaskSpec
 from .profile_calibration import ProfileCalibrationRegistry
 from .ui_fingerprint import UIFingerprintStore
 
@@ -54,8 +55,27 @@ class V1ReadinessEvaluator:
     def __init__(self, root: Path):
         self.root = root.resolve()
 
+    @staticmethod
+    def _task_for_dispatch(
+        plan: Plan | None,
+        recorder: EndToEndCalibrationRecorder,
+        dispatch_id: str,
+    ) -> TaskSpec | None:
+        if plan is None:
+            return None
+        events = recorder.evidence.events_for_dispatch(dispatch_id)
+        task_ids = {event.task_id for event in events if event.task_id}
+        if len(task_ids) != 1:
+            return None
+        task_id = next(iter(task_ids))
+        for task in plan.tasks:
+            if task.id == task_id:
+                return task
+        return None
+
     def run(self, *, current_ui_fingerprint: str | None = None) -> V1ReadinessReport:
         checks: list[ReadinessCheck] = []
+        plan: Plan | None = None
 
         # Automated/read-only integrity. Parsing these files is useful because it catches
         # malformed plans/routes before the live Windows layer is involved.
@@ -242,16 +262,43 @@ class V1ReadinessEvaluator:
                     ),
                 )
             )
+
+            e2e_status = "PENDING"
+            e2e_message = f"end-to-end verified levels={list(coverage.e2e_levels)}"
+            if coverage.end_to_end_complete:
+                recorder = EndToEndCalibrationRecorder(self.root, registry=registry)
+                issues: list[str] = []
+                records = registry.records()
+                for level in registry.REQUIRED_LEVELS:
+                    record = records.get(level)
+                    if record is None or not record.evidence_dispatch_id:
+                        issues.append(f"{level.value}: missing dispatch evidence id")
+                        continue
+                    task = self._task_for_dispatch(
+                        plan,
+                        recorder,
+                        record.evidence_dispatch_id,
+                    )
+                    if task is None:
+                        issues.append(f"{level.value}: dispatch does not map to exactly one planned task")
+                        continue
+                    ok, message = recorder.validate_record(task, record)
+                    if not ok:
+                        issues.append(f"{level.value}: {message}")
+                if issues:
+                    e2e_status = "BLOCKED"
+                    e2e_message = "end-to-end calibration evidence is inconsistent: " + "; ".join(issues)
+                else:
+                    e2e_status = "PASS"
+                    e2e_message = (
+                        "LOW/MEDIUM/HIGH all have fingerprint-bound submitted/response/check/PASS evidence"
+                    )
             checks.append(
                 ReadinessCheck(
                     "WINDOWS_END_TO_END_CALIBRATION",
                     "live_windows",
-                    "PASS" if coverage.end_to_end_complete else "PENDING",
-                    (
-                        "LOW/MEDIUM/HIGH all have end-to-end dispatch/response/check evidence"
-                        if coverage.end_to_end_complete
-                        else f"end-to-end verified levels={list(coverage.e2e_levels)}"
-                    ),
+                    e2e_status,
+                    e2e_message,
                 )
             )
         except (OSError, ValueError) as exc:
@@ -268,7 +315,7 @@ class V1ReadinessEvaluator:
                     "WINDOWS_END_TO_END_CALIBRATION",
                     "live_windows",
                     "BLOCKED",
-                    "end-to-end calibration cannot be trusted while the profile registry is invalid",
+                    "end-to-end calibration cannot be trusted while the profile/evidence registry is invalid",
                 )
             )
 
