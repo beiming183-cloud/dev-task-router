@@ -16,11 +16,12 @@ def test_plugin_manifest_and_marketplace_are_valid() -> None:
     marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
 
     assert manifest["name"] == "dev-task-router"
-    assert manifest["version"] == "0.5.0"
+    assert manifest["version"] == "0.6.0"
     assert manifest["skills"] == "./skills/"
     assert "mcpServers" not in manifest
     assert "apps" not in manifest
     assert manifest["interface"]["displayName"] == "项目拆解器"
+    assert "GitHub" in manifest["description"]
 
     plugins = marketplace["plugins"]
     assert len(plugins) == 1
@@ -31,6 +32,7 @@ def test_plugin_manifest_and_marketplace_are_valid() -> None:
 def test_required_skills_have_frontmatter_and_correct_routing_policy() -> None:
     required = {
         "index",
+        "inspect-repository",
         "decompose-project",
         "classify-task",
         "route-model",
@@ -48,13 +50,24 @@ def test_required_skills_have_frontmatter_and_correct_routing_policy() -> None:
     assert "LOW failure    → MEDIUM" in index_text
     assert "MEDIUM failure → HIGH" in index_text
     assert "weak-first" in index_text
+    assert "commit-anchored" in index_text
+    assert "repository dump" in index_text.lower()
+
+    inspect_text = (PLUGIN / "skills" / "inspect-repository" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "commit SHA" in inspect_text
+    assert "at most 12" in inspect_text
+    assert "Do not fabricate" in inspect_text
+    assert "changed_files" in inspect_text and "test_files" in inspect_text
 
     decompose_text = (PLUGIN / "skills" / "decompose-project" / "SKILL.md").read_text(
         encoding="utf-8"
     )
     assert "Project → Stage → Step → Task" in decompose_text
     assert "escalate_after: 1" in decompose_text
-    assert "surface" in decompose_text.lower()
+    assert "Surface" in decompose_text
+    assert "Repository" in decompose_text
 
     classify_text = (PLUGIN / "skills" / "classify-task" / "SKILL.md").read_text(
         encoding="utf-8"
@@ -62,6 +75,7 @@ def test_required_skills_have_frontmatter_and_correct_routing_policy() -> None:
     assert "blast radius" in classify_text
     assert "Confidence" in classify_text
     assert "Traits" in classify_text
+    assert "commit-anchored" in classify_text
 
     route_text = (PLUGIN / "skills" / "route-model" / "SKILL.md").read_text(
         encoding="utf-8"
@@ -69,3 +83,10 @@ def test_required_skills_have_frontmatter_and_correct_routing_policy() -> None:
     assert "Chat" in route_text
     assert "Codex / Work" in route_text
     assert "do not invent" in route_text.lower()
+
+    handoff_text = (PLUGIN / "skills" / "create-handoff" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Commit:" in handoff_text
+    assert "CI:" in handoff_text
+    assert "12 relevant" in handoff_text

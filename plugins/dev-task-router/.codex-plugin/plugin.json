@@ -1,7 +1,7 @@
 {
   "name": "dev-task-router",
-  "version": "0.5.0",
-  "description": "Decompose software projects, classify engineering difficulty, then map each task onto the models available in Chat, Codex, Work, or another execution surface.",
+  "version": "0.6.0",
+  "description": "Decompose software projects, inspect targeted GitHub repository evidence, classify engineering difficulty, then map each task onto the models available in Chat, Codex, Work, or another execution surface.",
   "author": {
     "name": "beiming183-cloud"
   },
@@ -12,6 +12,7 @@
     "task-decomposition",
     "difficulty-classification",
     "model-routing",
+    "github-context",
     "workflow",
     "planning",
     "handoff",
@@ -20,8 +21,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "项目拆解器",
-    "shortDescription": "先判任务难度，再按运行环境选择模型",
-    "longDescription": "把软件开发目标拆成 Project / Stage / Step / Task，先根据工程影响范围、架构耦合、状态复杂度、风险和验证成本把任务分类为 NONE、LOW、MEDIUM 或 HIGH，再根据当前 Chat、Codex、Work 等执行环境映射到具体模型与推理档位。真实任务失败后上调难度；不会把模型家族名称直接当作任务难度，也不会在没有配置时猜测 Codex/Work 模型家族的强弱顺序。",
+    "shortDescription": "结合仓库事实判断难度并路由模型",
+    "longDescription": "把软件开发目标拆成 Project / Stage / Step / Task；在真实 GitHub 仓库可用时，先读取与任务相关的 branch、commit、文件、测试、PR/diff 和 CI 证据，再判断 NONE、LOW、MEDIUM 或 HIGH，最后根据 Chat、Codex、Work 等执行环境映射模型与推理档位。只携带相关仓库上下文，不无差别读取整个仓库；真实任务失败后上调难度。",
     "developerName": "beiming183-cloud",
     "category": "Developer Tools",
     "capabilities": [
@@ -29,9 +30,9 @@
     ],
     "websiteURL": "https://github.com/beiming183-cloud/dev-task-router",
     "defaultPrompt": [
-      "把这个开发目标拆成阶段和任务，判断每个任务难度，再按当前运行环境选择模型。",
-      "判断这个任务应该是 LOW、MEDIUM 还是 HIGH，并说明依据和置信度。",
-      "检查这份计划有没有把简单任务分配过高，或把高风险任务分配过低。"
+      "结合当前 GitHub 仓库，把这个开发目标拆成任务并按真实难度分配模型。",
+      "读取与这个需求相关的代码、测试和 CI，再判断它应该是 LOW、MEDIUM 还是 HIGH。",
+      "基于当前 PR/diff 和 CI 生成下一模型需要的最小 handoff。"
     ]
   }
 }

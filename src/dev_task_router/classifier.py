@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .models import ModelLevel, TaskRole, TaskSpec
+from .repo_context import RepositoryContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,9 +75,13 @@ def _contains_any(text: str, hints: tuple[str, ...]) -> bool:
 
 
 class DifficultyClassifier:
-    """Deterministic V0.5 classifier with explainable, testable signals."""
+    """Explainable classifier using task text plus optional verified repository evidence."""
 
-    def classify(self, task: TaskSpec) -> DifficultyAssessment:
+    def classify(
+        self,
+        task: TaskSpec,
+        repository_context: RepositoryContext | None = None,
+    ) -> DifficultyAssessment:
         text = " ".join(
             part for part in (task.title, task.prompt or "", " ".join(task.acceptance)) if part
         ).lower()
@@ -154,6 +159,22 @@ class DifficultyClassifier:
             score += 1
             factors.append("broad acceptance surface +1")
 
+        repo_anchored = False
+        if repository_context is not None:
+            delta, repo_factors, repo_traits = repository_context.difficulty_signals()
+            score += delta
+            factors.extend(repo_factors)
+            traits.update(repo_traits)
+            repo_anchored = bool(repository_context.commit and repository_context.all_files)
+
+            if (
+                repository_context.ci_status == "failure"
+                and task.kind in {"normal_debug", "hard_debug", "review"}
+            ):
+                score += 1
+                factors.append("repo evidence: failing CI adds debugging uncertainty +1")
+                traits.add("ci-failure")
+
         score = max(score, 1)
 
         if score <= 2:
@@ -166,13 +187,17 @@ class DifficultyClassifier:
         known_kind = task.kind in _KIND_BASE
         if score <= 1 or score >= 10:
             confidence = "high"
+        elif repo_anchored and known_kind and len(factors) >= 3:
+            confidence = "high"
         elif not known_kind and len(factors) == 1:
             confidence = "low"
         else:
             confidence = "medium"
 
-        reason_parts = [factors[0]]
-        reason_parts.extend(factors[1:3])
+        reason_parts = factors[:3]
+        repo_factor = next((item for item in factors if item.startswith("repo evidence:")), None)
+        if repo_factor is not None and repo_factor not in reason_parts:
+            reason_parts.append(repo_factor)
         reason = "; ".join(reason_parts)
 
         return DifficultyAssessment(

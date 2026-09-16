@@ -1,6 +1,6 @@
 ---
 name: dev-task-router-index
-description: "Shared rules for the 项目拆解器 plugin. Use with the other Dev Task Router skills to decompose software work, classify difficulty, choose surface-specific model routes, define verification, and create compact handoffs."
+description: "Shared rules for the 项目拆解器 plugin. Use with the other Dev Task Router skills to inspect repository evidence, decompose software work, classify difficulty, choose surface-specific model routes, define verification, and create compact handoffs."
 ---
 
 # 项目拆解器 — Shared Rules
@@ -22,6 +22,35 @@ surface-specific model + effort
 ```
 
 Do not deliberately start every task on a weak model. The first attempt should use the tier predicted from the task itself.
+
+## Repository evidence before guessing
+
+When a real GitHub repository, branch, pull request, diff, or CI result can materially change the plan, use `inspect-repository` before final decomposition/classification.
+
+Prefer this order:
+
+```text
+user goal
+  ↓
+repository + branch/PR
+  ↓
+commit-anchored relevant files/tests/diff/CI
+  ↓
+Task decomposition
+  ↓
+Difficulty
+  ↓
+Surface route
+```
+
+Repository facts and user goals are different things:
+
+- GitHub evidence describes the current implementation state;
+- the user request describes the desired target state.
+
+Do not treat user prose as proof that code already behaves a certain way. Do not treat old branch evidence as current after the branch head changes.
+
+Use targeted evidence, not a repository dump. A normal handoff should carry only the relevant files, tests, verified facts, commit anchor, and CI state needed by the next task.
 
 ## Difficulty is not a model name
 
@@ -94,9 +123,11 @@ Consider:
 5. reversibility;
 6. verification cost;
 7. cross-module/public-interface impact;
-8. domain risk.
+8. domain risk;
+9. verified repository scope and module boundaries;
+10. relevant test/CI evidence.
 
-File count is only a signal. A one-line change can still be HIGH.
+File count is only a signal. A one-line change can still be HIGH. A repository evidence tag such as `auth`, `core-state`, `migration`, `public-api`, or `compatibility` can reveal hidden risk that was not obvious from the user wording.
 
 ## Surface mapping
 
@@ -170,6 +201,8 @@ For implementation tasks define objective evidence when possible:
 - exact behavior is demonstrated;
 - reviewer checks explicit acceptance criteria.
 
+When GitHub evidence exists, prefer acceptance criteria that name the relevant test/build/check or expected diff boundary rather than generic “tests pass”.
+
 AI text such as “done” is not completion evidence.
 
 ## Handoff rules
@@ -179,11 +212,12 @@ A handoff should contain only what the next task needs:
 - current goal;
 - difficulty;
 - current execution surface and resolved/unresolved route;
-- relevant files/modules;
+- repository / branch / commit anchor when available;
+- relevant files/modules/tests;
 - constraints that must not change;
-- verified facts;
+- verified facts and current CI state;
 - failure evidence, if any;
 - acceptance criteria;
 - next action.
 
-Do not copy the full chat history into a handoff.
+Do not copy the full chat history or full repository into a handoff.
