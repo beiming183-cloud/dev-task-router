@@ -8,6 +8,7 @@ import yaml
 from .mode_switch import LocalSwitchConfig
 from .models import Plan
 from .repo_context import RepositoryContext
+from .rolling_context import RollingProjectContext
 from .router import ModelCatalog
 from .surface import SurfaceCatalog
 
@@ -18,6 +19,7 @@ PROJECT_FILE = "project.yaml"
 MODELS_FILE = "models.yaml"
 SURFACES_FILE = "surfaces.yaml"
 REPO_CONTEXT_FILE = "repo-context.yaml"
+ROLLING_CONTEXT_FILE = "context.yaml"
 LOCAL_SWITCH_FILE = "local-switch.yaml"
 STATE_FILE = "state.json"
 HANDOFF_FILE = "handoff.md"
@@ -72,6 +74,30 @@ def load_repository_context(root: Path) -> RepositoryContext | None:
 
 def save_repository_context(root: Path, context: RepositoryContext) -> Path:
     path = autodev_dir(root) / REPO_CONTEXT_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump(context.to_dict(), allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    return path
+
+
+def load_rolling_context(root: Path, *, project: str | None = None) -> RollingProjectContext:
+    path = autodev_dir(root) / ROLLING_CONTEXT_FILE
+    if not path.exists():
+        if project is None:
+            project = load_plan(root).project
+        context = RollingProjectContext.empty(project)
+        save_rolling_context(root, context)
+        return context
+    context = RollingProjectContext.from_dict(load_yaml(path))
+    if project is not None and context.project != project:
+        raise ValueError("rolling context project does not match plan project")
+    return context
+
+
+def save_rolling_context(root: Path, context: RollingProjectContext) -> Path:
+    path = autodev_dir(root) / ROLLING_CONTEXT_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         yaml.safe_dump(context.to_dict(), allow_unicode=True, sort_keys=False),
@@ -191,6 +217,7 @@ def write_default_files(root: Path, project_name: str) -> list[Path]:
     plan_path = target / PLAN_FILE
     models_path = target / MODELS_FILE
     surfaces_path = target / SURFACES_FILE
+    context_path = target / ROLLING_CONTEXT_FILE
     local_switch_path = target / LOCAL_SWITCH_FILE
 
     if not project_path.exists():
@@ -216,6 +243,16 @@ def write_default_files(root: Path, project_name: str) -> list[Path]:
     if not surfaces_path.exists():
         surfaces_path.write_text(
             yaml.safe_dump(default_surfaces(), allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+
+    if not context_path.exists():
+        context_path.write_text(
+            yaml.safe_dump(
+                RollingProjectContext.empty(project_name).to_dict(),
+                allow_unicode=True,
+                sort_keys=False,
+            ),
             encoding="utf-8",
         )
 
@@ -265,4 +302,4 @@ def write_default_files(root: Path, project_name: str) -> list[Path]:
             encoding="utf-8",
         )
 
-    return [project_path, plan_path, models_path, surfaces_path, local_switch_path]
+    return [project_path, plan_path, models_path, surfaces_path, context_path, local_switch_path]
