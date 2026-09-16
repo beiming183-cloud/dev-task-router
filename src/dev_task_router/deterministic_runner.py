@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .checker import CheckReport, TaskChecker, git_snapshot, snapshot_digest
+from .debug_task import DebugTaskMaterializer
 from .execution_evidence import ExecutionEvidenceLedger
 from .executor import CommandExecutor, ExecutionRequest
 from .handoff import HandoffWriter
@@ -93,10 +94,13 @@ class DeterministicTaskRunner:
             task_state.get("status") in {TaskStatus.FAILED.value, TaskStatus.BLOCKED.value}
             and task_state.get("last_failure_type", "").startswith("DETERMINISTIC")
         ):
+            debug_file = task_state.get("debug_task_file")
+            suffix = f"; candidate: {debug_file}" if debug_file else ""
             return DeterministicRunResult(
                 task.id,
                 "DEBUG_TASK_REQUIRED",
-                "deterministic Task already failed; create a separate debug Task and classify it independently",
+                "deterministic Task already failed; use the separate debug Task and classify it independently"
+                + suffix,
             )
 
         route = self.router.route(task)
@@ -249,6 +253,27 @@ class DeterministicTaskRunner:
         state["status"] = WorkflowStatus.FAILED.value
         state["current_task"] = task.id
         self.store.save(state)
+
+        debug_note = ""
+        try:
+            candidate = DebugTaskMaterializer(self.root, self.plan, self.store).materialize(task.id)
+            relative = candidate.path.relative_to(self.root).as_posix()
+            debug_note = f"; debug Task candidate materialized at {relative}"
+            state = self.store.load()
+            self.evidence.record(
+                task_id=task.id,
+                kind="DEBUG_TASK_MATERIALIZED",
+                data={
+                    "source_failure_type": failure_type,
+                    "debug_task_id": candidate.debug_task_id,
+                    "path": relative,
+                    "auto_execute": False,
+                },
+            )
+        except (OSError, ValueError) as exc:
+            debug_note = f"; debug Task candidate could not be materialized: {exc}"
+            state = self.store.load()
+
         self.handoff.write(self.plan, state)
         self.usage.append(
             task_id=task.id,
@@ -259,6 +284,6 @@ class DeterministicTaskRunner:
         return DeterministicRunResult(
             task.id,
             "DEBUG_TASK_REQUIRED",
-            f"{message}; create a separate debug Task and classify it independently",
+            f"{message}{debug_note}; classify the separate debug Task independently before execution",
             check,
         )
