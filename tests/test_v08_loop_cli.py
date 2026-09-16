@@ -70,3 +70,28 @@ def test_local_gate_dry_run_never_claims_verified_dispatch(tmp_path, capsys) -> 
     assert payload["switch"]["backend"] == "dry-run"
     assert payload["switch"]["verified"] is False
     assert StateStore(tmp_path).load()["tasks"]["feature"]["attempts"] == 0
+
+
+def test_local_run_fails_closed_before_attempt_when_real_ui_is_uncalibrated(tmp_path, capsys) -> None:
+    _project(tmp_path)
+
+    code = main(["--root", str(tmp_path), "run", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 1
+    assert payload["status"] == "GATE_FAILED"
+    assert payload["infrastructure_failure"] is True
+    assert StateStore(tmp_path).load()["tasks"]["feature"]["attempts"] == 0
+
+
+def test_local_resume_never_creates_a_new_dispatch(tmp_path, capsys) -> None:
+    _project(tmp_path)
+
+    code = main(["--root", str(tmp_path), "resume", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 1
+    assert payload["status"] == "NO_ACTIVE_SESSION"
+    assert "refuses to create a new dispatch" in payload["message"]
+    assert StateStore(tmp_path).load()["tasks"]["feature"]["attempts"] == 0
+    assert not (autodev_dir(tmp_path) / "local-dispatch.json").exists()
