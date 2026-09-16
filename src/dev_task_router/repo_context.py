@@ -155,8 +155,8 @@ class RepositoryContext:
 
         risky = sorted(set(self.evidence_tags) & _HIGH_RISK_TAGS)
         if risky:
-            delta += 3
-            factors.append(f"repo evidence: high-risk tags {','.join(risky)} +3")
+            delta += 6
+            factors.append(f"repo evidence: high-risk tags {','.join(risky)} +6")
             traits.add("high-risk")
 
         if self.test_files:
