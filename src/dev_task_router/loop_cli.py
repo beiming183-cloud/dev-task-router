@@ -18,6 +18,7 @@ from .deterministic_runner import DeterministicTaskRunner
 from .evidence_cycle import EvidenceTrackingCycle
 from .execution_audit import LocalExecutionAuditor
 from .execution_evidence import ExecutionEvidenceLedger
+from .live_calibration import GuardedModeSwitchBackend, UIFingerprintExecutionGuard
 from .local_loop import DryRunConversationBackend, LocalConversationOrchestrator
 from .local_project_loop import LocalProjectLoop
 from .local_session import LocalTaskCycle
@@ -38,7 +39,8 @@ def _mode_backend(root: Path, *, dry_run: bool = False):
     config = load_local_switch(root)
     if config.backend == "dry-run":
         return DryRunModeSwitchBackend()
-    return WindowsUIAModeSwitchBackend(config)
+    backend = WindowsUIAModeSwitchBackend(config)
+    return GuardedModeSwitchBackend(backend, UIFingerprintExecutionGuard(root))
 
 
 def _conversation_backend(root: Path):
