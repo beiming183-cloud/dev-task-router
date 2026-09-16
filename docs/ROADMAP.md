@@ -2,11 +2,11 @@
 
 ## 总原则
 
-项目主线：**ChatGPT / Codex Plugin + Skills → 内容级难度判断 → Surface 路由 → GitHub 真实上下文 → 本地同会话精确切换 → Context 优化 → 自动执行。**
+项目主线：**ChatGPT / Codex Plugin + Skills → 内容级难度判断 → Surface 路由 → GitHub 真实上下文 → 同会话精确切换 + Rolling Context → 本地自动执行闭环。**
 
 V1.0 前继续保持轻量，不要求自建服务器、数据库集群、VS Code Extension 或 Agent Swarm。
 
-核心产品约束：**Task decomposition 不等于 conversation decomposition。** 复杂项目默认保持一个 canonical conversation；简单 Task 用低推理，复杂 Task 用高推理，优先在同一会话原地切换执行 profile。
+核心产品约束：**Task decomposition 不等于 conversation decomposition。** 复杂项目默认保持一个 canonical conversation；简单 Task 用低推理，复杂 Task 用高推理，优先在同一会话原地切换 execution profile。
 
 ---
 
@@ -65,9 +65,17 @@ User request    = 目标状态
 
 ---
 
-## V0.7 — 本地同会话 Exact Mode Switch 🚧
+## V0.7 — Same-Conversation Foundation 🚧
 
-目标：在 Windows 本地保持**同一个 ChatGPT 项目会话**，根据下一 Task 的 Difficulty / Surface route 自动切换模型与 reasoning profile，并且只有验证切换成功后才允许继续执行 Task。
+目标：让一个复杂项目长期保持**同一个 canonical ChatGPT conversation**，同时解决两个问题：
+
+```text
+不同 Task 需要不同 reasoning profile
++
+同一聊天窗口不可能无限承载全部历史细节
+```
+
+### A. Local Exact Mode Switch
 
 当前 candidate 已实现：
 
@@ -87,9 +95,8 @@ User request    = 目标状态
 - 默认禁用，必须先校准
 - UI 动作后无法验证则返回失败，不声称已经切换
 - 模式切换失败属于 `MODE_SWITCH`/执行基础设施问题，不触发 Difficulty 上调
-- 新 Skill：`switch-local-mode`
+- Skill：`switch-local-mode`
 - optional dependency：`pywinauto`
-- Python / Plugin candidate `0.7.0`
 
 本地验收流程：
 
@@ -98,60 +105,122 @@ User request    = 目标状态
 ↓
 autodev-mode probe --json
 ↓
-用真实 accessibility 标签校准 .autodev/local-switch.yaml
+校准 .autodev/local-switch.yaml
 ↓
 分别验证 LOW / MEDIUM / HIGH
 ↓
 每次必须 verified: true
 ```
 
-当前自动回归覆盖逻辑层和 dry-run；Windows ChatGPT 真机 UIA 仍必须在用户电脑完成一次校准和验收，不能用 Linux CI 冒充真机测试。
+Windows 真机校准由用户暂缓，因此 PR #7 保持 Draft；其余自动可验证开发继续推进。
+
+### B. Rolling Project Context / Task Context Pack
+
+已实现：
+
+- `.autodev/context.yaml`
+- `RollingProjectContext`
+- `ContextBudget`
+- `TaskContextPack`
+- `ContextPackBuilder`
+- project goal / decisions / constraints / stage notes / task notes
+- 字符串归一化去重
+- commit-anchor stale detection
+- repository files / facts / CI 的预算化选择
+- recent failure evidence budget
+- acceptance budget
+- requested execution profile 写入 pack
+- `autodev context`
+- `autodev context --import`
+- `autodev context-pack <task>`
+- handoff 改成 **Next Task Context Pack first**
+- PASSED 历史任务不反复占据 handoff
+- unresolved ledger 最多展示 10 个 Task
+- Skill：`build-context-pack`
+
+核心链路：
+
+```text
+same canonical conversation
+↓
+rolling project context
++
+current task-specific repository evidence
+↓
+Task Context Pack
+↓
+requested reasoning profile
+↓
+local exact switch
+↓ verified
+execute Task
+```
+
+Context Pack 的目的不是换窗口，而是让同一个长窗口在项目持续很久后仍有一个小而准确的工作集。
 
 ---
 
-## V0.8 — Rolling Project Context / Handoff
+## V0.8 — 本地自动执行闭环
 
-目标：即使长期坚持一个 canonical conversation，也不把正确性寄托在无限聊天历史上。
+目标：把目前已经存在的“拆解 / 分类 / Context Pack / Mode Switch / Checker”串成自动状态机，而不是要求用户逐条手动执行 CLI。
 
 计划：
 
-- Project / Stage / Task Context 分层；
-- Decision Registry；
-- protected constraints；
-- relevant-files 最小集合；
-- verified facts provenance；
-- failure evidence；
-- Context Budget；
-- stale evidence detection；
-- task-specific Context Pack；
-- 增量 handoff；
-- 防止完整聊天历史和完整仓库反复发送。
-
----
-
-## V0.9 — 本地自动执行闭环
-
-目标：把“拆 Task → 判难度 → 本地精确切 profile → 发送当前 Task → 验证 → 下一 Task”连成同一会话的自动闭环。
+- `LocalConversationExecutor` 抽象；
+- Task Ready 时自动生成 Context Pack；
+- 自动请求目标 profile；
+- `verified: true` 后才允许发送 Task；
+- 把 Task prompt + Context Pack 送入当前 canonical conversation；
+- 等待执行结果；
+- 收集 result / diff / test / CI；
+- 更新 workflow state；
+- 只把 durable information 写回 Rolling Context；
+- Task 成功后自动进入下一 Task；
+- 真正 Task failure 才做 `LOW → MEDIUM → HIGH`；
+- Mode/UI/permission/network failure 不升级 Difficulty；
+- pause / resume / recovery；
+- 用户可设置最大连续 Task 数和人工确认边界。
 
 ```text
-Task
+Task Ready
 ↓
-Difficulty classifier
+Context Pack
 ↓
-Surface router
+Difficulty / Route
 ↓
 ModeSwitchController
 ↓ verified
-canonical ChatGPT conversation
+Current ChatGPT Conversation
 ↓
 Task execution
 ↓
-Checker / GitHub / CI
+Checker / Reviewer / GitHub evidence
 ↓
-next Task
+Rolling Context update
+↓
+Next Task
 ```
 
-API Provider 仍可作为以后可选辅助层，但不是当前主路线；云端 exact switching 暂不作为 V0.7/V0.8 阻塞项。
+API Provider 仍可作为以后可选辅助层，但不是当前主路线；云端 exact switching 暂不作为 V0.8 阻塞项。
+
+---
+
+## V0.9 — 稳定性、恢复与成本校准
+
+目标：让本地长时间运行更可靠，并逐步校准“哪些 Task 真正需要更高 reasoning”。
+
+计划：
+
+- mode-switch selector drift detection；
+- ChatGPT UI change recovery；
+- stuck-task timeout；
+- duplicate-send protection；
+- execution lease / idempotency；
+- crash recovery；
+- requested vs actual profile audit；
+- predicted difficulty → actual success/failure 统计；
+- 减少无意义 HIGH；
+- usage / token / time 指标。
 
 ---
 
@@ -166,9 +235,10 @@ API Provider 仍可作为以后可选辅助层，但不是当前主路线；云�
 - Windows 本地 exact mode switching；
 - requested/actual profile 验证；
 - GitHub 真实上下文；
-- Rolling Project Context；
+- Rolling Project Context + Task Context Pack；
 - Checker / Reviewer / failure reclassification；
-- 本地自动执行闭环。
+- 本地自动执行闭环；
+- pause / resume / recovery。
 
 不作为 V1.0 阻塞项：云端 exact mode switch、自建服务器、多用户、VS Code UI、Agent Swarm。
 
@@ -176,11 +246,6 @@ API Provider 仍可作为以后可选辅助层，但不是当前主路线；云�
 
 # 当前下一步
 
-完成 **V0.7 Windows 真机校准**：
+V0.7 自动部分继续完成回归；Windows 真机校准暂缓。
 
-1. 保持 ChatGPT 桌面端打开在同一个项目会话。
-2. 安装 local extra。
-3. 运行 `autodev-mode probe --json`。
-4. 根据真实 UIA 控件填充 `.autodev/local-switch.yaml`。
-5. 实测 `LOW / MEDIUM / HIGH` 三档。
-6. 三档均返回 `verified: true` 后，再开 PR/合并 V0.7。
+随后进入 **V0.8 本地自动执行闭环**：先实现 `Task Ready → Context Pack → requested profile → switch gate` 的执行契约，再接真正的当前 ChatGPT conversation 驱动。
