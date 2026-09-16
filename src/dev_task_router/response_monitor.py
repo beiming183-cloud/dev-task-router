@@ -1,14 +1,43 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest() if text else ""
 
 
 @dataclass(frozen=True, slots=True)
 class ResponseSnapshot:
     busy: bool
     messages: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ResponseBaseline:
+    message_count: int
+    latest_digest: str
+
+    @classmethod
+    def from_messages(cls, messages: tuple[str, ...]) -> "ResponseBaseline":
+        latest = ConversationResponseMonitor._latest(messages)
+        return cls(message_count=len(messages), latest_digest=_digest(latest))
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ResponseBaseline":
+        return cls(
+            message_count=max(0, int(data.get("message_count", 0))),
+            latest_digest=str(data.get("latest_digest", "")),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "message_count": self.message_count,
+            "latest_digest": self.latest_digest,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,14 +101,20 @@ class ConversationResponseMonitor:
                 return text
         return ""
 
-    def collect(self, baseline_messages: tuple[str, ...] = ()) -> ResponseCollectionResult:
-        baseline_latest = self._latest(baseline_messages)
+    def collect(
+        self,
+        baseline_messages: tuple[str, ...] = (),
+        *,
+        baseline: ResponseBaseline | None = None,
+    ) -> ResponseCollectionResult:
+        baseline = baseline or ResponseBaseline.from_messages(baseline_messages)
         started_at = self.clock()
         polls = 0
         saw_activity = False
         stable_text = ""
         stable_count = 0
         latest_seen = ""
+        latest_is_new = False
 
         while True:
             snapshot = self.source.snapshot()
@@ -87,7 +122,14 @@ class ConversationResponseMonitor:
             latest = self._latest(snapshot.messages)
             latest_seen = latest or latest_seen
 
-            changed_from_baseline = bool(latest and latest != baseline_latest)
+            changed_from_baseline = bool(
+                latest
+                and (
+                    len(snapshot.messages) > baseline.message_count
+                    or _digest(latest) != baseline.latest_digest
+                )
+            )
+            latest_is_new = changed_from_baseline
             if snapshot.busy or changed_from_baseline:
                 saw_activity = True
 
@@ -115,7 +157,7 @@ class ConversationResponseMonitor:
             if self.clock() - started_at >= self.timeout_seconds:
                 return ResponseCollectionResult(
                     completed=False,
-                    response_text=latest_seen if changed_from_baseline else "",
+                    response_text=latest_seen if latest_is_new else "",
                     polls=polls,
                     saw_activity=saw_activity,
                     reason="response collection timed out before a stable new assistant response was verified",
