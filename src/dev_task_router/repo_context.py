@@ -40,6 +40,15 @@ def _string_tuple(value: Any, field_name: str) -> tuple[str, ...]:
     return tuple(clean)
 
 
+def _lower_unique(values: tuple[str, ...]) -> tuple[str, ...]:
+    result: list[str] = []
+    for value in values:
+        lowered = value.lower()
+        if lowered not in result:
+            result.append(lowered)
+    return tuple(result)
+
+
 def _module_key(path_text: str) -> str:
     parts = PurePosixPath(path_text).parts
     if not parts:
@@ -97,9 +106,7 @@ class RepositoryContext:
             test_files=_string_tuple(data.get("test_files"), "test_files"),
             ci_status=ci_status,
             ci_checks=_string_tuple(data.get("ci_checks"), "ci_checks"),
-            evidence_tags=tuple(
-                item.lower() for item in _string_tuple(data.get("evidence_tags"), "evidence_tags")
-            ),
+            evidence_tags=_lower_unique(_string_tuple(data.get("evidence_tags"), "evidence_tags")),
             facts=_string_tuple(data.get("facts"), "facts"),
             source=source,
             captured_at=(
@@ -116,8 +123,12 @@ class RepositoryContext:
         return tuple(ordered)
 
     @property
+    def scope_files(self) -> tuple[str, ...]:
+        return self.changed_files or self.relevant_files
+
+    @property
     def module_count(self) -> int:
-        return len({_module_key(path) for path in self.all_files if _module_key(path)})
+        return len({_module_key(path) for path in self.scope_files if _module_key(path)})
 
     def difficulty_signals(self) -> tuple[int, tuple[str, ...], tuple[str, ...]]:
         """Return a conservative score delta plus explainable repository evidence."""
@@ -125,8 +136,7 @@ class RepositoryContext:
         factors: list[str] = []
         traits: set[str] = set()
 
-        scope_files = self.changed_files or self.relevant_files
-        file_count = len(scope_files)
+        file_count = len(self.scope_files)
         if file_count >= 8:
             delta += 3
             factors.append(f"repo evidence: broad file scope ({file_count}) +3")
