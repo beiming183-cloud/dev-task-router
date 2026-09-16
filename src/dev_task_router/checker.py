@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,10 +19,10 @@ class CheckReport:
     failure_type: str | None = None
 
 
-def git_snapshot(root: Path) -> str | None:
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
     try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=all"],
+        return subprocess.run(
+            ["git", *args],
             cwd=root,
             capture_output=True,
             text=True,
@@ -31,9 +32,43 @@ def git_snapshot(root: Path) -> str | None:
         )
     except OSError:
         return None
-    if result.returncode != 0:
+
+
+def git_snapshot(root: Path) -> str | None:
+    """Return a content-sensitive snapshot of tracked, staged and untracked changes."""
+    probe = _git(root, "rev-parse", "--is-inside-work-tree")
+    if probe is None or probe.returncode != 0 or probe.stdout.strip() != "true":
         return None
-    return result.stdout
+
+    status = _git(root, "status", "--porcelain", "--untracked-files=all")
+    unstaged = _git(root, "diff", "--no-ext-diff", "--binary")
+    staged = _git(root, "diff", "--cached", "--no-ext-diff", "--binary")
+    if any(item is None or item.returncode != 0 for item in (status, unstaged, staged)):
+        return None
+
+    untracked_hashes: list[str] = []
+    for line in status.stdout.splitlines():
+        if not line.startswith("?? "):
+            continue
+        relative = line[3:]
+        path = root / relative
+        if not path.is_file():
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        untracked_hashes.append(f"{relative}:{digest}")
+
+    return "\n".join(
+        [
+            "[status]",
+            status.stdout,
+            "[unstaged]",
+            unstaged.stdout,
+            "[staged]",
+            staged.stdout,
+            "[untracked-hashes]",
+            "\n".join(untracked_hashes),
+        ]
+    )
 
 
 class TaskChecker:
