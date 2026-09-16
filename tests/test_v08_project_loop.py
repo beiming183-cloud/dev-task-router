@@ -7,6 +7,7 @@ from dev_task_router.config import (
     save_rolling_context,
     write_default_files,
 )
+from dev_task_router.local_loop import LocalConversationOrchestrator
 from dev_task_router.local_project_loop import LocalProjectLoop
 from dev_task_router.local_session import LocalCycleResult
 from dev_task_router.models import Plan
@@ -114,6 +115,21 @@ def test_verified_pass_updates_only_machine_verified_rolling_facts(tmp_path) -> 
     assert rolling.last_commit == "anchor-old"
     assert "MODEL PROSE" not in text
     assert rolling.decisions == ("Keep one canonical conversation",)
+
+
+def test_next_task_prepare_reloads_latest_stage_context(tmp_path) -> None:
+    plan, store = _root(tmp_path)
+    orchestrator = LocalConversationOrchestrator(tmp_path, plan, store)
+    cycle = FakeCycle(
+        [LocalCycleResult("one", "PASSED", "abcdef1234567890", False, "checker passed")]
+    )
+    loop = LocalProjectLoop(tmp_path, plan, store, cycle)  # type: ignore[arg-type]
+
+    loop.run_one()
+    envelope = orchestrator.prepare(plan.tasks[1])
+
+    assert "Verified PASS one: First feature." in envelope.context_pack.stage_notes
+    assert envelope.context_pack.task_id == "two"
 
 
 def test_rolling_note_updates_are_normalized_and_deduplicated() -> None:
