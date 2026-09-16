@@ -20,7 +20,14 @@ from .response_monitor import (
 from .state import StateStore, now_iso
 
 
-_ACTIVE_SESSION_STATUSES = {"SUBMITTED", "WAITING_RESPONSE", "COLLECTED", "PREPARED"}
+_ACTIVE_SESSION_STATUSES = {
+    "PREPARED",
+    "SUBMITTED",
+    "WAITING_RESPONSE",
+    "COLLECTED",
+    "CHECKED",
+    "REVIEW_REQUIRED",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +42,13 @@ class LocalCycleResult:
 
     @property
     def completed(self) -> bool:
-        return self.status in {"PASSED", "CHECK_FAILED", "BLOCKED", "REVIEW_REQUIRED"}
+        return self.status in {
+            "PASSED",
+            "CHECK_FAILED",
+            "FAILED",
+            "BLOCKED",
+            "REVIEW_REQUIRED",
+        }
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -300,7 +313,27 @@ class LocalTaskCycle:
         dispatch_id: str,
         session: dict[str, Any],
     ) -> LocalCycleResult:
-        if session.get("status") == "COLLECTED":
+        status = session.get("status")
+        if status == "REVIEW_REQUIRED":
+            return LocalCycleResult(
+                task.id,
+                "REVIEW_REQUIRED",
+                dispatch_id,
+                False,
+                "checker already passed; independent review is still required before PASS",
+            )
+        if status == "CHECKED":
+            raw = session.get("check") or {}
+            check = CheckReport(
+                ok=bool(raw.get("ok")),
+                message=str(raw.get("message", "checker result recovered")),
+                evidence="",
+                returncode=raw.get("returncode"),
+                failure_type=raw.get("failure_type"),
+            )
+            route = self._route_from_session(task, session)
+            return self._record_check(task, route, dispatch_id, check)
+        if status == "COLLECTED":
             return self._check_collected(task, dispatch_id, session)
         return self._collect_and_check(task, dispatch_id, session)
 
@@ -391,6 +424,26 @@ class LocalTaskCycle:
     def _record_check(self, task: TaskSpec, route, dispatch_id: str, check: CheckReport) -> LocalCycleResult:
         state = self.store.ensure_for_plan(self.plan)
         task_state = state["tasks"][task.id]
+
+        # Idempotent crash recovery: once this dispatch_id reached durable workflow
+        # state, replaying CHECKED must not increment attempts or append failures again.
+        if task_state.get("local_dispatch_id") == dispatch_id:
+            current = task_state.get("status")
+            if current == TaskStatus.PASSED.value:
+                self.sessions.update(dispatch_id, status="PASSED")
+                return LocalCycleResult(task.id, "PASSED", dispatch_id, False, "check result already recorded", check=check)
+            if current == TaskStatus.RUNNING.value and task.review:
+                self.sessions.update(dispatch_id, status="REVIEW_REQUIRED")
+                return LocalCycleResult(task.id, "REVIEW_REQUIRED", dispatch_id, False, "review requirement already recorded", check=check)
+            if current == TaskStatus.BLOCKED.value:
+                self.sessions.update(dispatch_id, status="BLOCKED")
+                return LocalCycleResult(task.id, "BLOCKED", dispatch_id, False, task_state.get("last_error") or check.message, check=check)
+            if current == TaskStatus.FAILED.value:
+                terminal = int(task_state.get("attempts", 0)) >= task.max_attempts
+                session_status = "FAILED" if terminal else "CHECK_FAILED"
+                self.sessions.update(dispatch_id, status=session_status)
+                return LocalCycleResult(task.id, session_status, dispatch_id, False, task_state.get("last_error") or check.message, check=check)
+
         task_state["attempts"] = int(task_state.get("attempts", 0)) + 1
         task_state["started_at"] = task_state.get("started_at") or now_iso()
         task_state["finished_at"] = now_iso()
@@ -473,7 +526,7 @@ class LocalTaskCycle:
                 else WorkflowStatus.FAILED.value
             )
             state["current_task"] = task.id
-            session_status = "BLOCKED"
+            session_status = "BLOCKED" if task.max_attempts > 1 else "FAILED"
         else:
             state["status"] = WorkflowStatus.READY.value
             state["current_task"] = None
