@@ -60,7 +60,7 @@ medium
 high
 ```
 
-Do **not** invent an ordering such as `lunar < terra < sol < astra` unless the user or current product configuration explicitly provides that ordering.
+Do not invent an ordering such as `lunar < terra < sol < astra` unless the user or current product configuration explicitly provides that ordering.
 
 If no family-to-difficulty policy is configured, output the classified difficulty plus the available pool and mark model-family selection as unresolved.
 
