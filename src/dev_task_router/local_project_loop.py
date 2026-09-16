@@ -89,7 +89,7 @@ class LocalProjectLoop:
         title = self._task_title(result.task_id)
         if result.dispatch_id:
             dispatch = result.dispatch_id[:12]
-            task_note = f"Verified PASS by objective execution gates; dispatch={dispatch}."
+            task_note = f"Verified PASS by Checker; dispatch={dispatch}."
         else:
             task_note = "Verified deterministic PASS by command/checker."
         stage_note = f"Verified PASS {result.task_id}: {title}."
