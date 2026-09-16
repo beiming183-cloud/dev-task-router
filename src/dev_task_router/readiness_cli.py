@@ -11,6 +11,7 @@ from .conversation_response_ui import load_local_response_config
 from .conversation_ui import WindowsUIAConversationBackend, load_local_conversation_config
 from .debug_task import DebugTaskMaterializer
 from .mode_switch import WindowsUIAModeSwitchBackend
+from .readiness import V1ReadinessEvaluator
 from .state import StateStore
 from .ui_fingerprint import UIFingerprint, UIFingerprintStore
 
@@ -140,10 +141,28 @@ def cmd_calibration(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_readiness(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    fingerprint = _fingerprint(root).digest if args.probe_ui else None
+    report = V1ReadinessEvaluator(root).run(current_ui_fingerprint=fingerprint)
+    payload = report.to_dict()
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"automated ready: {'yes' if report.automated_ready else 'no'}")
+        print(f"live Windows ready: {'yes' if report.live_windows_ready else 'no'}")
+        print(f"release ready: {'yes' if report.release_ready else 'no'}")
+        for check in report.checks:
+            print(f"{check.status}\t{check.code}\t{check.message}")
+        if not args.probe_ui:
+            print("live UI was not probed; use --probe-ui only on the target Windows ChatGPT build")
+    return 0 if report.release_ready else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="autodev-readiness",
-        description="V1.0 readiness diagnostics for UI drift, debug-task materialization, and routing outcomes",
+        description="V1.0 readiness diagnostics for UI drift, debug-task materialization, routing outcomes, and release gates",
     )
     parser.add_argument("--root", help="project root; defaults to current directory")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -174,6 +193,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     calibration.add_argument("--json", action="store_true")
     calibration.set_defaults(func=cmd_calibration)
+
+    readiness = sub.add_parser(
+        "readiness",
+        help="separate automated readiness, target-Windows live readiness, and final release readiness",
+    )
+    readiness.add_argument(
+        "--probe-ui",
+        action="store_true",
+        help="read the target Windows UI fingerprint for this report; never clicks controls",
+    )
+    readiness.add_argument("--json", action="store_true")
+    readiness.set_defaults(func=cmd_readiness)
     return parser
 
 
