@@ -4,7 +4,7 @@
 
 一个轻量级、多模型、可恢复、可验证的 AI 开发任务拆解与路由 Plugin。
 
-项目主线是 **ChatGPT / Codex Plugin + Skills**。它把复杂开发目标拆成可执行 Task，结合 GitHub 真实仓库判断工程难度，再把 Difficulty 映射到当前执行 Surface。V0.7 开始优先解决一个关键问题：**保持同一个项目会话，同时在任务边界精确切换模型/思考强度。**
+项目主线是 **ChatGPT / Codex Plugin + Skills**。它把复杂开发目标拆成可执行 Task，结合 GitHub 真实仓库判断工程难度，再把 Difficulty 映射到当前执行 Surface。V0.7 的核心是：**不拆聊天窗口，在同一个项目会话里切换 reasoning profile，并用 Rolling Context 控制长项目上下文。**
 
 ## 核心链路
 
@@ -14,6 +14,8 @@
 GitHub 相关仓库事实
   ↓
 Project → Stage → Step → Task
+  ↓
+Rolling Project Context + Task Context Pack
   ↓
 NONE / LOW / MEDIUM / HIGH
   ↓
@@ -32,7 +34,7 @@ Local ModeSwitchController
 Task decomposition != conversation decomposition
 ```
 
-拆任务不等于拆聊天窗口。复杂项目默认保持一个 canonical conversation，简单 Task 少用推理，复杂 Task 多用推理。
+拆任务不等于拆聊天窗口。复杂项目默认保持一个 canonical conversation，简单 Task 少用推理，复杂 Task 多用推理；聊天历史很长时，用 compact context pack 保留真正重要的信息，而不是重新发送完整历史。
 
 ## Difficulty 与模型分层
 
@@ -53,9 +55,11 @@ efforts:  low / medium / high
 
 项目不会擅自猜 Codex/Work family 强弱顺序；未配置 route 时保持 `unresolved`。
 
-## V0.7 本地 Exact Mode Switch
+## V0.7 Same-Conversation Foundation
 
-V0.7 candidate 新增：
+### Local Exact Mode Switch
+
+V0.7 candidate 包含：
 
 ```text
 RequestedProfile
@@ -81,38 +85,71 @@ autodev-mode switch MEDIUM --surface chat --json
 autodev-mode switch HIGH --surface chat --json
 ```
 
-设计原则：
+原则：不用固定屏幕坐标；使用 Windows UI Automation / accessibility；selector / family / effort / verify labels 配置化；`requested` 与 `actual` 分开；切换后必须验证；mode-switch failure 不触发 Difficulty promotion。
 
-- 不用固定屏幕坐标；
-- 使用 Windows UI Automation / accessibility；
-- selector / family / effort / verify labels 全部配置化；
-- 默认禁用，必须先对当前 ChatGPT build 做一次 probe；
-- `requested` 与 `actual` profile 分开记录；
-- UI 动作后必须验证；
-- 无法验证就失败，不允许在错误 profile 下继续 Task；
-- mode-switch failure 属于执行基础设施问题，不触发 `LOW → MEDIUM → HIGH` 难度升级。
+Windows 真机验收目前由用户暂缓，因此 PR #7 保持 Draft。
 
-### Windows 安装
+### Rolling Project Context
 
-```powershell
-pip install -e ".[local]"
+`autodev init` 现在生成：
+
+```text
+.autodev/context.yaml
 ```
 
-然后打开 ChatGPT 桌面端并停留在要继续开发的同一个项目会话：
+只保存跨 Task 仍然有价值的信息：
 
-```powershell
-autodev-mode probe --json
+```text
+project goal
+decisions
+protected constraints
+stage notes
+task notes
+last commit anchor
 ```
 
-把真实 UIA 标签写入 `.autodev/local-switch.yaml`，启用后再逐档验收。只有返回：
+Python Core：
 
-```json
-{
-  "verified": true
-}
+```text
+RollingProjectContext
+ContextBudget
+TaskContextPack
+ContextPackBuilder
 ```
 
-才算 exact switch 成功。
+CLI：
+
+```text
+autodev context
+autodev context --json
+autodev context --import <yaml/json>
+autodev context-pack <task-id>
+autodev context-pack <task-id> --json
+```
+
+Context Pack 默认只携带当前 Task 真正需要的：仍有效的 decisions/constraints、当前 stage/task notes、acceptance、最近 failure evidence、相关 repo files/facts/CI、requested profile 和 exact next action。
+
+如果 `context.last_commit` 与当前 repository commit 不一致，会标记：
+
+```text
+stale_context: true
+```
+
+提示刷新 commit-sensitive facts。
+
+### Handoff
+
+`handoff.md` 已改成 **Next Task Context Pack first**：
+
+```text
+当前项目状态
+↓
+下一个 Task 的 compact context pack
+↓
+最多 10 个 unresolved Task
+```
+
+已经 PASSED 的老任务不再反复展开，避免长项目 handoff 越滚越大。
 
 ## GitHub Repository Context
 
@@ -149,6 +186,7 @@ inspect-repository
 decompose-project
 classify-task
 route-model
+build-context-pack
 switch-local-mode
 create-handoff
 ```
@@ -161,13 +199,14 @@ create-handoff
 
 - Project / Stage / Step / Task；
 - `RepositoryContext`；
+- `RollingProjectContext / TaskContextPack`；
 - 内容级 `DifficultyClassifier`；
 - `SurfaceCatalog / SurfaceDecision`；
 - `ModeSwitchController`；
 - RuleRouter；
 - Checker / Reviewer；
 - Retry / Escalation / BLOCKED；
-- state / handoff / usage；
+- compact handoff / state / usage；
 - GitHub Actions CI。
 
 ## 路线图
@@ -178,9 +217,9 @@ create-handoff
 - **V0.4 ✅**：Plugin + Skills
 - **V0.5 ✅**：内容级 Difficulty + Surface Router
 - **V0.6 ✅**：GitHub 真实仓库上下文
-- **V0.7 🚧**：Windows 本地同会话 Exact Mode Switch
-- **V0.8**：Rolling Project Context / Handoff
-- **V0.9**：本地自动执行闭环
+- **V0.7 🚧**：同会话 Exact Mode Switch + Rolling Context / Task Context Pack
+- **V0.8**：本地自动执行闭环
+- **V0.9**：稳定性 / 恢复 / 路由校准
 - **V1.0**：完整轻量本地多模型开发编排
 
 ## 文档
@@ -193,10 +232,10 @@ create-handoff
 
 **V0.7 candidate on `feature/v0.7-local-exact-switch`.**
 
-自动回归已覆盖配置、路由、dry-run、requested/actual contract 和 Plugin package。最终完成还要求 Windows 真机对当前 ChatGPT build 完成一次 LOW / MEDIUM / HIGH 三档 UIA 验收。
+自动部分已经进入回归；Windows 真机 LOW / MEDIUM / HIGH UIA 验收暂缓。PR #7 保持 Draft，不会在未验证本地 exact switch 的情况下假装 V0.7 已完成。
 
 ---
 
 Dev Task Router 最终目标是：
 
-> **把一个复杂项目拆成不同难度的任务，在同一个项目会话里让简单任务少想、复杂任务多想，同时始终用 GitHub、测试和 actual-profile 验证作为事实来源。**
+> **把一个复杂项目拆成不同难度的任务，在同一个项目会话里让简单任务少想、复杂任务多想，同时用 Rolling Context、GitHub、测试和 actual-profile 验证维持长期正确性。**
