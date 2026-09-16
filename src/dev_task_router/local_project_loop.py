@@ -6,10 +6,11 @@ from typing import Any
 
 from .config import load_rolling_context, save_rolling_context
 from .deterministic_runner import DeterministicTaskRunner
+from .e2e_calibration import EndToEndCalibrationRecorder
 from .handoff import HandoffWriter
 from .local_review import IndependentLocalReviewer
 from .local_session import LocalCycleResult, LocalTaskCycle
-from .models import Plan
+from .models import Plan, TaskSpec
 from .state import StateStore, now_iso
 
 
@@ -39,6 +40,11 @@ class LocalProjectLoop:
     is never mined for durable decisions or constraints. CHECK_FAILED and a clean
     independent REVIEW_FAILED may continue to another implementation attempt because
     they are genuine execution evidence; infrastructure and ambiguous states stop.
+
+    V1.0 additionally treats end-to-end profile calibration as non-authoritative
+    metadata: after a real model Task reaches final PASS, complete durable execution
+    evidence may enrich the live calibration registry, but failure to record that
+    metadata never changes the already verified Task result.
     """
 
     CONTINUE_STATUSES = {"PASSED", "CHECK_FAILED", "REVIEW_FAILED"}
@@ -52,6 +58,7 @@ class LocalProjectLoop:
         *,
         deterministic_runner: DeterministicTaskRunner | None = None,
         reviewer_runner: IndependentLocalReviewer | None = None,
+        e2e_calibration: EndToEndCalibrationRecorder | None = None,
     ):
         self.root = root
         self.plan = plan
@@ -68,19 +75,26 @@ class LocalProjectLoop:
                 evidence=getattr(cycle, "evidence", None),
             )
         self.reviewer_runner = reviewer_runner
+        self.e2e_calibration = e2e_calibration or EndToEndCalibrationRecorder(
+            root,
+            evidence=getattr(cycle, "evidence", None),
+            sessions=getattr(cycle, "sessions", None),
+        )
         self.handoff = HandoffWriter(root)
 
-    def _task_title(self, task_id: str) -> str:
+    def _task(self, task_id: str) -> TaskSpec | None:
         for task in self.plan.tasks:
             if task.id == task_id:
-                return task.title
-        return task_id
+                return task
+        return None
+
+    def _task_title(self, task_id: str) -> str:
+        task = self._task(task_id)
+        return task.title if task is not None else task_id
 
     def _task_stage(self, task_id: str) -> str:
-        for task in self.plan.tasks:
-            if task.id == task_id:
-                return task.stage_id
-        return "default"
+        task = self._task(task_id)
+        return task.stage_id if task is not None else "default"
 
     def _record_verified_pass(self, result: LocalCycleResult) -> None:
         if result.status != "PASSED" or not result.task_id:
@@ -108,6 +122,23 @@ class LocalProjectLoop:
         save_rolling_context(self.root, rolling)
         self.handoff.write(self.plan, self.store.ensure_for_plan(self.plan))
 
+    def _record_e2e_profile_calibration(self, result: LocalCycleResult) -> None:
+        if result.status != "PASSED" or not result.task_id or not result.dispatch_id:
+            return
+        task = self._task(result.task_id)
+        if task is None:
+            return
+        # Reviewer writes its own durable evidence after the wrapped model cycle has
+        # already synced once. Re-sync before validating the final PASS so the evidence
+        # ledger sees the latest session/workflow status as well.
+        sync = getattr(self.cycle, "sync_dispatch", None)
+        if callable(sync):
+            try:
+                sync(result.dispatch_id)
+            except (OSError, RuntimeError, ValueError):
+                return
+        self.e2e_calibration.try_record(task, result.dispatch_id)
+
     def run_one(self) -> LocalCycleResult:
         result = self.cycle.run_next()
         if result.status == "DETERMINISTIC" and self.deterministic_runner is not None:
@@ -134,6 +165,7 @@ class LocalProjectLoop:
             result = self.reviewer_runner.run(result.task_id, result.dispatch_id)
 
         self._record_verified_pass(result)
+        self._record_e2e_profile_calibration(result)
         return result
 
     def run_until_blocked(self, *, max_cycles: int = 10) -> LocalProjectLoopResult:
