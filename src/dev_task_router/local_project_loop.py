@@ -58,6 +58,15 @@ class LocalProjectLoop:
         self.store = store
         self.cycle = cycle
         self.deterministic_runner = deterministic_runner
+        if reviewer_runner is None and hasattr(cycle, "orchestrator") and hasattr(cycle, "sessions"):
+            reviewer_runner = IndependentLocalReviewer(
+                root,
+                plan,
+                store,
+                cycle.orchestrator.router,
+                cycle.sessions,
+                evidence=getattr(cycle, "evidence", None),
+            )
         self.reviewer_runner = reviewer_runner
         self.handoff = HandoffWriter(root)
 
