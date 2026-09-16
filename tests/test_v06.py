@@ -35,7 +35,7 @@ def test_repository_context_parses_deduplicates_and_compacts() -> None:
             "test_files": ["tests/test_a.py"],
             "ci_status": "success",
             "ci_checks": ["pytest", "build"],
-            "evidence_tags": ["Public-API"],
+            "evidence_tags": ["Public-API", "public-api"],
             "facts": ["A calls B"],
         }
     )
@@ -77,8 +77,9 @@ def test_broad_repo_scope_can_raise_medium_task_to_high() -> None:
                 "modules/history/e.py",
                 "modules/history/f.py",
                 "app/input/g.py",
-                "tests/test_input.py",
+                "app/input/h.py",
             ],
+            "test_files": ["tests/test_input.py"],
         }
     )
     assessed = DifficultyClassifier().classify(task, context)
@@ -106,6 +107,28 @@ def test_localized_repo_evidence_does_not_inflate_simple_edit() -> None:
     assessed = DifficultyClassifier().classify(task, context)
     assert assessed.level == ModelLevel.LOW
     assert "localized" in assessed.traits
+
+
+def test_related_test_file_does_not_create_fake_cross_module_scope() -> None:
+    task = TaskSpec(
+        id="label",
+        title="Rename label",
+        prompt="rename one UI label",
+        kind="simple_edit",
+    )
+    context = RepositoryContext.from_dict(
+        {
+            "repository": "owner/repo",
+            "commit": "abc",
+            "relevant_files": ["src/ui/labels.py"],
+            "test_files": ["tests/test_labels.py"],
+        }
+    )
+    assert context.module_count == 1
+    assessed = DifficultyClassifier().classify(task, context)
+    assert assessed.level == ModelLevel.LOW
+    assert "tests-known" in assessed.traits
+    assert "cross-module" not in assessed.traits
 
 
 def test_verified_high_risk_repo_tag_catches_pseudo_simple_change() -> None:
