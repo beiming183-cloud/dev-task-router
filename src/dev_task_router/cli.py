@@ -7,9 +7,16 @@ from pathlib import Path
 
 import yaml
 
-from .config import load_models, load_plan, write_default_files
+from .config import (
+    load_models,
+    load_plan,
+    load_repository_context,
+    save_repository_context,
+    write_default_files,
+)
 from .handoff import HandoffWriter
 from .models import TaskStatus, WorkflowStatus
+from .repo_context import RepositoryContext
 from .router import RuleRouter
 from .state import StateStore
 from .workflow import WorkflowEngine
@@ -39,8 +46,12 @@ def cmd_init(args: argparse.Namespace) -> int:
 def cmd_plan(args: argparse.Namespace) -> int:
     root = project_root(args.root)
     plan = load_plan(root)
-    router = RuleRouter(load_models(root))
+    repository_context = load_repository_context(root)
+    router = RuleRouter(load_models(root), repository_context=repository_context)
     print(f"project: {plan.project}")
+    if repository_context is not None:
+        anchor = repository_context.commit or repository_context.branch or "unanchored"
+        print(f"repository: {repository_context.repository} @ {anchor}")
     for index, task in enumerate(plan.tasks, 1):
         route = router.route(task)
         extras: list[str] = []
@@ -50,6 +61,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
             extras.append(f"review={task.review_level.value}")
         if task.require_diff:
             extras.append("require_diff")
+        if route.confidence:
+            extras.append(f"confidence={route.confidence}")
         suffix = f" [{' '.join(extras)}]" if extras else ""
         print(
             f"{index}. {task.stage_id}/{task.step_id} [{task.role.value}/{route.level.value}] "
@@ -63,6 +76,42 @@ def cmd_models(args: argparse.Namespace) -> int:
     catalog = load_models(project_root(args.root))
     for level, profile in catalog.profiles.items():
         print(f"{level.value}: {profile.provider}:{profile.model} via {profile.executor}")
+    return 0
+
+
+def cmd_repo_context(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    if args.import_file:
+        source = Path(args.import_file).expanduser().resolve()
+        if not source.exists():
+            raise FileNotFoundError(source)
+        text = source.read_text(encoding="utf-8")
+        if source.suffix.lower() == ".json":
+            data = json.loads(text)
+        else:
+            data = yaml.safe_load(text)
+        if not isinstance(data, dict):
+            raise ValueError("repository context input must contain a mapping")
+        context = RepositoryContext.from_dict(data)
+        path = save_repository_context(root, context)
+        print(f"saved repository context: {path.relative_to(root)}")
+        return 0
+
+    context = load_repository_context(root)
+    if context is None:
+        print("repository context: none")
+        return 0
+    if args.json:
+        print(json.dumps(context.to_dict(), ensure_ascii=False, indent=2))
+        return 0
+    print(f"repository: {context.repository}")
+    print(f"branch: {context.branch or 'unknown'}")
+    print(f"commit: {context.commit or 'unanchored'}")
+    print(f"pr: {context.pr_number or 'none'}")
+    print(f"ci: {context.ci_status}")
+    print(f"relevant files: {len(context.all_files)}")
+    if context.evidence_tags:
+        print(f"tags: {', '.join(context.evidence_tags)}")
     return 0
 
 
@@ -201,7 +250,7 @@ def cmd_handoff(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="autodev", description="Dev Task Router V0.3")
+    parser = argparse.ArgumentParser(prog="autodev", description="Dev Task Router V0.6")
     parser.add_argument("--root", help="project root; defaults to current directory")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -215,6 +264,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("pause", help="pause before the next task").set_defaults(func=cmd_pause)
     sub.add_parser("resume", help="resume a paused workflow").set_defaults(func=cmd_resume)
     sub.add_parser("handoff", help="regenerate handoff.md").set_defaults(func=cmd_handoff)
+
+    repo_parser = sub.add_parser("repo-context", help="show or import verified repository context")
+    repo_parser.add_argument("--import", dest="import_file", help="import YAML/JSON repository evidence")
+    repo_parser.add_argument("--json", action="store_true", help="print raw context JSON")
+    repo_parser.set_defaults(func=cmd_repo_context)
 
     retry_parser = sub.add_parser("retry", help="reset one FAILED/BLOCKED task")
     retry_parser.add_argument("task", help="task id")
