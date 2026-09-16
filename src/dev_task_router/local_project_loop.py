@@ -7,10 +7,11 @@ from typing import Any
 from .config import load_rolling_context, save_rolling_context
 from .deterministic_runner import DeterministicTaskRunner
 from .e2e_calibration import EndToEndCalibrationRecorder
+from .execution_evidence import ExecutionEvidenceLedger
 from .handoff import HandoffWriter
 from .local_review import IndependentLocalReviewer
 from .local_session import LocalCycleResult, LocalTaskCycle
-from .models import Plan, TaskSpec
+from .models import Plan, TaskSpec, TaskStatus, WorkflowStatus
 from .state import StateStore, now_iso
 
 
@@ -45,6 +46,10 @@ class LocalProjectLoop:
     metadata: after a real model Task reaches final PASS, complete durable execution
     evidence may enrich the live calibration registry, but failure to record that
     metadata never changes the already verified Task result.
+
+    A verified generated debug Task may reopen its failed deterministic source for one
+    ordinary NONE recheck. The source keeps its previous attempts/failure history; it
+    is never promoted into the model Task that fixed it.
     """
 
     CONTINUE_STATUSES = {"PASSED", "CHECK_FAILED", "REVIEW_FAILED"}
@@ -65,6 +70,7 @@ class LocalProjectLoop:
         self.store = store
         self.cycle = cycle
         self.deterministic_runner = deterministic_runner
+        self.evidence = getattr(cycle, "evidence", None) or ExecutionEvidenceLedger(root)
         if reviewer_runner is None and hasattr(cycle, "orchestrator") and hasattr(cycle, "sessions"):
             reviewer_runner = IndependentLocalReviewer(
                 root,
@@ -72,12 +78,12 @@ class LocalProjectLoop:
                 store,
                 cycle.orchestrator.router,
                 cycle.sessions,
-                evidence=getattr(cycle, "evidence", None),
+                evidence=self.evidence,
             )
         self.reviewer_runner = reviewer_runner
         self.e2e_calibration = e2e_calibration or EndToEndCalibrationRecorder(
             root,
-            evidence=getattr(cycle, "evidence", None),
+            evidence=self.evidence,
             sessions=getattr(cycle, "sessions", None),
         )
         self.handoff = HandoffWriter(root)
@@ -139,6 +145,50 @@ class LocalProjectLoop:
                 return
         self.e2e_calibration.try_record(task, result.dispatch_id)
 
+    def _reopen_debug_source_after_pass(self, result: LocalCycleResult) -> None:
+        if result.status != "PASSED" or not result.task_id:
+            return
+        state = self.store.ensure_for_plan(self.plan)
+        debug_state = state["tasks"].get(result.task_id)
+        if not isinstance(debug_state, dict):
+            return
+        source_id = str(debug_state.get("generated_from_debug_source") or "").strip()
+        if not source_id:
+            return
+        source_state = state["tasks"].get(source_id)
+        if not isinstance(source_state, dict):
+            return
+        if source_state.get("debug_task_id") != result.task_id:
+            return
+        if not source_state.get("debug_task_required"):
+            return
+        if source_state.get("status") not in {TaskStatus.FAILED.value, TaskStatus.BLOCKED.value}:
+            return
+
+        preserved_attempts = int(source_state.get("attempts", 0))
+        source_state["status"] = TaskStatus.PENDING.value
+        source_state["last_error"] = None
+        source_state["last_failure_type"] = None
+        source_state["finished_at"] = None
+        source_state["debug_task_required"] = False
+        source_state["debug_task_recheck_pending"] = True
+        source_state["debug_task_resolved_by"] = result.task_id
+        source_state["debug_task_resolved_at"] = now_iso()
+        state["status"] = WorkflowStatus.READY.value
+        state["current_task"] = None
+        self.store.save(state)
+        self.evidence.record(
+            task_id=source_id,
+            dispatch_id=result.dispatch_id,
+            kind="DEBUG_SOURCE_REOPENED",
+            data={
+                "debug_task_id": result.task_id,
+                "preserved_attempts": preserved_attempts,
+                "next_execution": "deterministic_recheck",
+            },
+        )
+        self.handoff.write(self.plan, state)
+
     def run_one(self) -> LocalCycleResult:
         result = self.cycle.run_next()
         if result.status == "DETERMINISTIC" and self.deterministic_runner is not None:
@@ -166,6 +216,7 @@ class LocalProjectLoop:
 
         self._record_verified_pass(result)
         self._record_e2e_profile_calibration(result)
+        self._reopen_debug_source_after_pass(result)
         return result
 
     def run_until_blocked(self, *, max_cycles: int = 10) -> LocalProjectLoopResult:
