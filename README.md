@@ -124,14 +124,26 @@ dev-task-router/
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — 分阶段开发路线
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 架构与模块边界
 - [`docs/REFERENCES.md`](docs/REFERENCES.md) — Aider、LiteLLM、OpenHands、Roomote 等设计借鉴说明
+- [`docs/V0.1.md`](docs/V0.1.md) — V0.1 当前实现与使用方法
 
 ## 当前状态
 
-**Status: Planning / V0.1 not started**
+**Status: V0.1 Core implemented on `feature/v0.1-core`**
 
-第一阶段的唯一目标：
+当前已经跑通第一条最小闭环：
 
-> 做出 `autodev start` 的最小闭环：读取计划 → 选择模型 → 调用执行器 → 检查结果 → 保存状态 → 进入下一任务。
+> `plan.yaml` → 校验任务 → 单执行器运行 → checks → 持久化 `state.json` → 下一任务 / FAILED / PASSED。
+
+V0.1 当前提供：
+
+```text
+autodev init
+autodev plan
+autodev start
+autodev pause
+autodev resume
+autodev status
+```
 
 ---
 
