@@ -15,6 +15,7 @@ from .conversation_ui import (
     load_local_conversation_config,
 )
 from .local_loop import DryRunConversationBackend, LocalConversationOrchestrator
+from .local_project_loop import LocalProjectLoop
 from .local_session import LocalTaskCycle
 from .mode_switch import DryRunModeSwitchBackend, WindowsUIAModeSwitchBackend
 from .response_monitor import ConversationResponseMonitor
@@ -76,6 +77,11 @@ def _cycle(root: Path) -> LocalTaskCycle:
     return LocalTaskCycle(root, plan, store, orchestrator, monitor)
 
 
+def _project_loop(root: Path) -> LocalProjectLoop:
+    cycle = _cycle(root)
+    return LocalProjectLoop(root, cycle.plan, cycle.store, cycle)
+
+
 def _print_cycle(result, *, json_output: bool) -> None:
     if json_output:
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
@@ -90,6 +96,19 @@ def _print_cycle(result, *, json_output: bool) -> None:
         print(f"response polls: {result.response.polls}")
     if result.check is not None:
         print(f"checker: {'PASS' if result.check.ok else 'FAIL'}")
+
+
+def _print_project_loop(result, *, json_output: bool) -> None:
+    if json_output:
+        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+        return
+    for index, item in enumerate(result.cycles, 1):
+        print(
+            f"{index}. {item.task_id or '-'}: {item.status} "
+            f"dispatch={item.dispatch_id or '-'}"
+        )
+    print(f"stop: {result.stop_reason}")
+    print(f"workflow: {result.workflow_status}")
 
 
 def cmd_prepare(args: argparse.Namespace) -> int:
@@ -175,7 +194,7 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     root = project_root(args.root)
-    result = _cycle(root).run_next()
+    result = _project_loop(root).run_one()
     _print_cycle(result, json_output=args.json)
     if result.status in {"PASSED", "DETERMINISTIC", "REVIEW_REQUIRED", "NO_TASK"}:
         return 0
@@ -184,7 +203,8 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_resume(args: argparse.Namespace) -> int:
     root = project_root(args.root)
-    cycle = _cycle(root)
+    loop = _project_loop(root)
+    cycle = loop.cycle
     task = cycle.orchestrator.next_task()
     if task is None:
         payload = {
@@ -219,16 +239,25 @@ def cmd_resume(args: argparse.Namespace) -> int:
             print(payload["message"])
         return 1
 
-    result = cycle.run_next()
+    result = loop.run_one()
     _print_cycle(result, json_output=args.json)
     return 0 if result.status in {"PASSED", "REVIEW_REQUIRED"} else 1
+
+
+def cmd_continue(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    result = _project_loop(root).run_until_blocked(max_cycles=args.max_cycles)
+    _print_project_loop(result, json_output=args.json)
+    if result.stop_reason in {"COMPLETE", "REVIEW_REQUIRED", "DETERMINISTIC"}:
+        return 0
+    return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="autodev-local",
         description=(
-            "Prepare, gate, dispatch, collect and verify the next Task in the canonical local ChatGPT conversation"
+            "Prepare, gate, dispatch, collect and verify Tasks in the canonical local ChatGPT conversation"
         ),
     )
     parser.add_argument("--root", help="project root; defaults to current directory")
@@ -279,6 +308,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     resume.add_argument("--json", action="store_true", help="print the cycle result as JSON")
     resume.set_defaults(func=cmd_resume)
+
+    continuous = sub.add_parser(
+        "continue",
+        help="continue across verified Tasks/retries until blocked, complete, or the cycle guard is reached",
+    )
+    continuous.add_argument(
+        "--max-cycles",
+        type=int,
+        default=10,
+        help="maximum model Task cycles in this invocation (default: 10)",
+    )
+    continuous.add_argument("--json", action="store_true", help="print the project loop result as JSON")
+    continuous.set_defaults(func=cmd_continue)
     return parser
 
 
