@@ -7,7 +7,13 @@ from pathlib import Path
 from .config import load_local_switch, load_surfaces
 from .conversation_response_ui import load_local_response_config
 from .conversation_ui import WindowsUIAConversationBackend, load_local_conversation_config
-from .mode_switch import ModeSwitchController, WindowsUIAModeSwitchBackend
+from .mode_switch import (
+    ModeSwitchBackend,
+    ModeSwitchController,
+    RequestedProfile,
+    SwitchResult,
+    WindowsUIAModeSwitchBackend,
+)
 from .models import ModelLevel
 from .profile_calibration import ProfileCalibrationRecord, ProfileCalibrationRegistry
 from .ui_fingerprint import UIFingerprint, UIFingerprintStore
@@ -109,6 +115,32 @@ class UIFingerprintExecutionGuard:
             baseline_digest=baseline.digest,
             current_digest=current.digest,
         )
+
+
+class GuardedModeSwitchBackend:
+    """Run the fingerprint guard immediately before any real mode-switch click."""
+
+    def __init__(self, backend: ModeSwitchBackend, guard: UIFingerprintExecutionGuard):
+        self.backend = backend
+        self.guard = guard
+        self.name = f"guarded-{backend.name}"
+
+    def probe(self) -> list[dict[str, str]]:
+        return self.backend.probe()
+
+    def switch(self, requested: RequestedProfile) -> SwitchResult:
+        guard = self.guard.check()
+        if not guard.allowed:
+            return SwitchResult(
+                requested=requested,
+                actual_family=None,
+                actual_effort=None,
+                verified=False,
+                backend=self.name,
+                changed=False,
+                message=f"UI_DRIFT/{guard.status}: {guard.message}",
+            )
+        return self.backend.switch(requested)
 
 
 class LiveProfileCalibrator:
