@@ -4,10 +4,11 @@ from pathlib import Path
 from typing import TextIO
 
 from .checker import TaskChecker, git_snapshot
-from .config import load_models
+from .config import load_models, load_repository_context
 from .executor import ExecutionRequest, ExecutorRegistry
 from .handoff import HandoffWriter
 from .models import Plan, TaskStatus, WorkflowStatus
+from .repo_context import RepositoryContext
 from .retry import level_for_attempt
 from .reviewer import Reviewer
 from .router import ModelCatalog, RuleRouter, RoutingDecision
@@ -24,6 +25,7 @@ class WorkflowEngine:
         catalog: ModelCatalog | None = None,
         registry: ExecutorRegistry | None = None,
         output: TextIO | None = None,
+        repository_context: RepositoryContext | None = None,
     ):
         import sys
 
@@ -31,7 +33,10 @@ class WorkflowEngine:
         self.plan = plan
         self.store = store
         self.catalog = catalog or load_models(root)
-        self.router = RuleRouter(self.catalog)
+        self.repository_context = (
+            repository_context if repository_context is not None else load_repository_context(root)
+        )
+        self.router = RuleRouter(self.catalog, repository_context=self.repository_context)
         self.registry = registry or ExecutorRegistry()
         self.command_executor = self.registry.get("command")
         self.checker = TaskChecker(self.command_executor)
@@ -44,13 +49,15 @@ class WorkflowEngine:
         print(text, file=self.output)
 
     @staticmethod
-    def _route_dict(route: RoutingDecision) -> dict[str, str]:
+    def _route_dict(route: RoutingDecision) -> dict[str, object]:
         return {
             "level": route.level.value,
             "provider": route.profile.provider,
             "model": route.profile.model,
             "executor": route.profile.executor,
             "reason": route.reason,
+            "confidence": route.confidence,
+            "traits": list(route.traits),
         }
 
     def _save(self, state: dict) -> None:
