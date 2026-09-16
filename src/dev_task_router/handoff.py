@@ -19,9 +19,19 @@ class HandoffWriter:
         self.root = root
         self.path = autodev_dir(root) / HANDOFF_FILE
 
+    @staticmethod
+    def _route_text(item: dict) -> str:
+        route = item.get("route") or {}
+        if not route:
+            return "-"
+        return (
+            f"{route.get('level')} / {route.get('provider')}:{route.get('model')} "
+            f"via {route.get('executor')}"
+        )
+
     def write(self, plan: Plan, state: dict) -> Path:
-        passed = [
-            task.id
+        passed_tasks = [
+            task
             for task in plan.tasks
             if state["tasks"][task.id]["status"] == TaskStatus.PASSED.value
         ]
@@ -38,7 +48,7 @@ class HandoffWriter:
             f"- Project: `{plan.project}`",
             f"- Workflow: `{state['status']}`",
             f"- Current task: `{state.get('current_task') or 'none'}`",
-            f"- Completed: {len(passed)}/{len(plan.tasks)}",
+            f"- Completed: {len(passed_tasks)}/{len(plan.tasks)}",
             f"- Next unresolved: `{next_task.id if next_task else 'none'}`",
             "- Conversation policy: keep the same canonical project conversation when possible.",
         ]
@@ -65,26 +75,39 @@ class HandoffWriter:
                 requested_route=requested_route,
             )
             pack_text = pack.to_markdown().strip().splitlines()
-            # Replace the pack's H1 so the handoff remains one document.
             lines.extend(["", "## Next Task Context Pack", ""])
             if pack_text and pack_text[0].startswith("# "):
                 pack_text = pack_text[1:]
                 if pack_text and not pack_text[0].strip():
                     pack_text = pack_text[1:]
             lines.extend(pack_text)
-        elif repo is not None:
-            compact = repo.compact(max_files=8, max_facts=4)
-            lines.extend(
-                [
-                    "",
-                    "## Final repository anchor",
-                    "",
-                    f"- Repository: `{compact['repository']}`",
-                    f"- Branch: `{compact['branch'] or 'unknown'}`",
-                    f"- Commit: `{compact['commit'] or 'unanchored'}`",
-                    f"- CI: `{compact['ci_status']}`",
-                ]
-            )
+        else:
+            if passed_tasks:
+                last_task = passed_tasks[-1]
+                last_item = state["tasks"][last_task.id]
+                lines.extend(
+                    [
+                        "",
+                        "## Final completed task",
+                        "",
+                        f"- Stage / Step: `{last_task.stage_id}` / `{last_task.step_id}`",
+                        f"- Task: `{last_task.id}` — {last_task.title}",
+                        f"- Route: `{self._route_text(last_item)}`",
+                    ]
+                )
+            if repo is not None:
+                compact = repo.compact(max_files=8, max_facts=4)
+                lines.extend(
+                    [
+                        "",
+                        "## Final repository anchor",
+                        "",
+                        f"- Repository: `{compact['repository']}`",
+                        f"- Branch: `{compact['branch'] or 'unknown'}`",
+                        f"- Commit: `{compact['commit'] or 'unanchored'}`",
+                        f"- CI: `{compact['ci_status']}`",
+                    ]
+                )
 
         lines.extend(
             [
@@ -98,13 +121,7 @@ class HandoffWriter:
         visible = pending_tasks[:10]
         for task in visible:
             item = state["tasks"][task.id]
-            route = item.get("route") or {}
-            route_text = "-"
-            if route:
-                route_text = (
-                    f"{route.get('level')} / {route.get('provider')}:{route.get('model')} "
-                    f"via {route.get('executor')}"
-                )
+            route_text = self._route_text(item)
             failure_type = item.get("last_failure_type") or "-"
             failure_message = (item.get("last_error") or "-").replace("|", "\\|").replace("\n", " ")
             if len(failure_message) > 120:
