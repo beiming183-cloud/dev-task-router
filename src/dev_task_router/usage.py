@@ -50,12 +50,25 @@ class UsageLogger:
     ) -> bool:
         if usage_id and self._has_usage_id(usage_id):
             return False
+
         duration = None
         if duration_seconds is not None:
-            duration = max(0.0, float(duration_seconds))
+            if (
+                isinstance(duration_seconds, bool)
+                or not isinstance(duration_seconds, (int, float))
+                or duration_seconds < 0
+            ):
+                raise ValueError(
+                    "duration_seconds must be a non-negative number when provided"
+                )
+            duration = float(duration_seconds)
+
         for name, value in (("input_tokens", input_tokens), ("output_tokens", output_tokens)):
-            if value is not None and (not isinstance(value, int) or value < 0):
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+            ):
                 raise ValueError(f"{name} must be a non-negative integer when provided")
+
         record = {
             "timestamp": now_iso(),
             "usage_id": usage_id,
