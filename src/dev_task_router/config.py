@@ -205,8 +205,9 @@ def default_local_switch() -> dict[str, Any]:
 def default_local_conversation() -> dict[str, Any]:
     """Safe-by-default current-conversation UIA configuration.
 
-    It is intentionally disabled and uncalibrated. No Task can be submitted until
-    the user's current ChatGPT build exposes and verifies the composer/send controls.
+    Composer/send and response collection are intentionally disabled and uncalibrated.
+    No Task can be submitted or treated as response-complete until the user's current
+    ChatGPT build has been probed and configured.
     """
     return {
         "version": 1,
@@ -220,6 +221,16 @@ def default_local_conversation() -> dict[str, Any]:
         "send": {
             "labels": [],
             "control_types": ["Button"],
+        },
+        "response": {
+            "enabled": False,
+            "busy_labels": [],
+            "busy_control_types": ["Button"],
+            "assistant_control_types": ["Text", "Document"],
+            "assistant_automation_id_regex": "",
+            "poll_interval_seconds": 1.0,
+            "timeout_seconds": 900.0,
+            "stable_polls": 2,
         },
         "limits": {
             "max_prompt_chars": 60000,
