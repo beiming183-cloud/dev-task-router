@@ -2,24 +2,66 @@
 
 这是 Dev Task Router 的轻量 OpenAI Plugin 包。
 
-V0.4 采用 **skill-only** 设计：不包含 MCP server、不要求自建服务器、不要求数据库，也不绑定 VS Code。
+V0.5 继续保持 **skill-only**：不要求 MCP server、自建服务器、数据库或 VS Code。
 
-## 核心能力
+## 核心链路
 
-- 把软件开发目标拆成 `Project → Stage → Step → Task`；
-- 根据工程难度直接分类为 `NONE / LOW / MEDIUM / HIGH`；
-- 初次任务直接使用匹配难度的模型档位，而不是统一从弱模型开始；
-- 若模型任务因真实实现/推理问题失败，把失败视为难度低估证据：`LOW → MEDIUM → HIGH`；
-- 基础设施、权限、限流、网络等失败不会触发错误的难度升级；
-- 为每个任务生成可验证 acceptance criteria；
-- 在模型/对话切换时生成最小 handoff。
+```text
+开发目标
+  ↓
+Project → Stage → Step → Task
+  ↓
+任务内容级难度判断
+  ↓
+NONE / LOW / MEDIUM / HIGH
+  ↓
+当前 Surface
+  ↓
+Chat / Codex / Work 的具体模型路由
+```
+
+难度与具体模型分开：`HIGH` 说明任务复杂，不代表某个固定模型家族。
 
 ## Skills
 
-- `index`：共享难度、路由、失败升级、验证和 handoff 规则；
-- `decompose-project`：把完整开发目标拆成分阶段计划；
-- `classify-task`：单独判断任务真实难度与后续升级路径；
+- `index`：共享难度、失败重分类、验证和 handoff 规则；
+- `decompose-project`：自动拆 Stage / Step / Task；
+- `classify-task`：输出 Difficulty / Reason / Confidence / Traits；
+- `route-model`：把难度映射到 Chat / Codex / Work；
 - `create-handoff`：生成下一模型所需的最小上下文。
+
+## 当前 Surface 规则
+
+Chat 当前配置：
+
+```text
+LOW    → 5.6 Sol Low
+MEDIUM → 5.6 Sol Medium
+HIGH   → 5.6 Sol High
+```
+
+Codex / Work 当前暴露：
+
+```text
+families: lunar / terra / sol / astra
+efforts: low / medium / high
+```
+
+但项目不会擅自假设这些 family 的强弱顺序。没有配置路由时返回 `unresolved` + candidate pool。
+
+## 失败后
+
+真实实现/推理失败：
+
+```text
+LOW → MEDIUM
+MEDIUM → HIGH
+HIGH → HIGH retry / BLOCKED
+```
+
+这表示第一次分类可能低估，不是故意从弱模型开始试。
+
+权限、网络、限流、凭据、工具不可用等基础设施失败不应该提升难度。
 
 ## Plugin manifest
 
@@ -33,10 +75,4 @@ plugins/dev-task-router/.codex-plugin/plugin.json
 .agents/plugins/marketplace.json
 ```
 
-结构参考 OpenAI 当前 role-specific plugin 模板，Skill-only 版本不声明 `.app.json` 或 `.mcp.json`。
-
-## 设计边界
-
-Skill 本身负责：拆解、分类、路由建议、失败重分类、验收定义和 handoff。
-
-Skill 本身不会假装已经切换 ChatGPT 当前模型。真正自动切换/调用不同模型需要产品侧支持或后续独立执行集成。
+Skill 本身不会声称已经替 ChatGPT 切换当前模型；真正自动调用不同模型需要后续执行集成。

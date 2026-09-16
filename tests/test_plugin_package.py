@@ -16,7 +16,7 @@ def test_plugin_manifest_and_marketplace_are_valid() -> None:
     marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
 
     assert manifest["name"] == "dev-task-router"
-    assert manifest["version"] == "0.4.0"
+    assert manifest["version"] == "0.5.0"
     assert manifest["skills"] == "./skills/"
     assert "mcpServers" not in manifest
     assert "apps" not in manifest
@@ -33,6 +33,7 @@ def test_required_skills_have_frontmatter_and_correct_routing_policy() -> None:
         "index",
         "decompose-project",
         "classify-task",
+        "route-model",
         "create-handoff",
     }
 
@@ -53,3 +54,18 @@ def test_required_skills_have_frontmatter_and_correct_routing_policy() -> None:
     )
     assert "Project → Stage → Step → Task" in decompose_text
     assert "escalate_after: 1" in decompose_text
+    assert "surface" in decompose_text.lower()
+
+    classify_text = (PLUGIN / "skills" / "classify-task" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "blast radius" in classify_text
+    assert "Confidence" in classify_text
+    assert "Traits" in classify_text
+
+    route_text = (PLUGIN / "skills" / "route-model" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Chat" in route_text
+    assert "Codex / Work" in route_text
+    assert "do not invent" in route_text.lower()

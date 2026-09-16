@@ -1,7 +1,7 @@
 {
   "name": "dev-task-router",
-  "version": "0.4.0",
-  "description": "Decompose software projects into staged tasks, classify task difficulty, and route each task to the appropriate model tier without default weak-first escalation.",
+  "version": "0.5.0",
+  "description": "Decompose software projects, classify engineering difficulty, then map each task onto the models available in Chat, Codex, Work, or another execution surface.",
   "author": {
     "name": "beiming183-cloud"
   },
@@ -10,18 +10,18 @@
   "keywords": [
     "software-development",
     "task-decomposition",
+    "difficulty-classification",
     "model-routing",
     "workflow",
     "planning",
     "handoff",
-    "token-optimization",
     "developer-tools"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "项目拆解器",
-    "shortDescription": "按任务难度拆解并路由开发工作",
-    "longDescription": "把一个软件开发目标拆成 Project / Stage / Step / Task，按实际复杂度把每个任务分为 NONE、LOW、MEDIUM 或 HIGH，并生成可执行顺序、验收条件和最小上下文 handoff。核心原则是难度优先路由：简单任务直接交给低档位，中等任务直接交给中档位，复杂任务直接交给高档位；失败默认在原档位重试，不把弱模型试错当作常规流程。",
+    "shortDescription": "先判任务难度，再按运行环境选择模型",
+    "longDescription": "把软件开发目标拆成 Project / Stage / Step / Task，先根据工程影响范围、架构耦合、状态复杂度、风险和验证成本把任务分类为 NONE、LOW、MEDIUM 或 HIGH，再根据当前 Chat、Codex、Work 等执行环境映射到具体模型与推理档位。真实任务失败后上调难度；不会把模型家族名称直接当作任务难度，也不会在没有配置时猜测 Codex/Work 模型家族的强弱顺序。",
     "developerName": "beiming183-cloud",
     "category": "Developer Tools",
     "capabilities": [
@@ -29,9 +29,9 @@
     ],
     "websiteURL": "https://github.com/beiming183-cloud/dev-task-router",
     "defaultPrompt": [
-      "把这个开发目标拆成阶段和任务，并按难度分配模型档位。",
-      "检查这份开发计划有没有把简单任务错误地交给高档位模型。",
-      "为下一个模型生成最小上下文 handoff。"
+      "把这个开发目标拆成阶段和任务，判断每个任务难度，再按当前运行环境选择模型。",
+      "判断这个任务应该是 LOW、MEDIUM 还是 HIGH，并说明依据和置信度。",
+      "检查这份计划有没有把简单任务分配过高，或把高风险任务分配过低。"
     ]
   }
 }

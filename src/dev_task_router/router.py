@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .classifier import DifficultyAssessment, DifficultyClassifier
 from .models import ModelLevel, TaskSpec
 
 
@@ -20,6 +21,8 @@ class RoutingDecision:
     level: ModelLevel
     profile: ModelProfile
     reason: str
+    confidence: str | None = None
+    traits: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -79,11 +82,28 @@ class ModelCatalog:
 
 
 class RuleRouter:
-    def __init__(self, catalog: ModelCatalog):
+    def __init__(self, catalog: ModelCatalog, classifier: DifficultyClassifier | None = None):
         self.catalog = catalog
+        self.classifier = classifier or DifficultyClassifier()
 
-    def decision_for_level(self, level: ModelLevel, reason: str) -> RoutingDecision:
-        return RoutingDecision(level=level, profile=self.catalog.profiles[level], reason=reason)
+    def decision_for_level(
+        self,
+        level: ModelLevel,
+        reason: str,
+        *,
+        confidence: str | None = None,
+        traits: tuple[str, ...] = (),
+    ) -> RoutingDecision:
+        return RoutingDecision(
+            level=level,
+            profile=self.catalog.profiles[level],
+            reason=reason,
+            confidence=confidence,
+            traits=traits,
+        )
+
+    def assess(self, task: TaskSpec) -> DifficultyAssessment:
+        return self.classifier.classify(task)
 
     def route(
         self,
@@ -98,9 +118,20 @@ class RuleRouter:
                 override_reason or f"override:{override_level.value}",
             )
         if task.level is not None:
-            level = task.level
-            reason = "explicit task level"
-        else:
-            level = self.catalog.rules.get(task.kind, ModelLevel.MEDIUM)
-            reason = f"rule:{task.kind}" if task.kind in self.catalog.rules else "default:MEDIUM"
-        return self.decision_for_level(level, reason)
+            return self.decision_for_level(
+                task.level,
+                "explicit task level",
+                confidence="high",
+            )
+
+        assessment = self.assess(task)
+        rule_level = self.catalog.rules.get(task.kind)
+        reason = f"classifier:{assessment.reason}"
+        if rule_level is not None and rule_level != assessment.level:
+            reason += f"; legacy rule={rule_level.value}"
+        return self.decision_for_level(
+            assessment.level,
+            reason,
+            confidence=assessment.confidence,
+            traits=assessment.traits,
+        )
