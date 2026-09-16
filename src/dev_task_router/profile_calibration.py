@@ -93,7 +93,8 @@ class ProfileCalibrationRegistry:
 
     The registry cannot create verification from a requested profile alone. A switch
     record is accepted only from a `SwitchResult` whose backend actually reported
-    `verified=True`. End-to-end verification is a separate later boundary.
+    `verified=True`. End-to-end verification is a separate later boundary and must
+    match the family/effort that was actually calibrated for the level.
     """
 
     REQUIRED_LEVELS = (ModelLevel.LOW, ModelLevel.MEDIUM, ModelLevel.HIGH)
@@ -171,6 +172,8 @@ class ProfileCalibrationRegistry:
         *,
         ui_fingerprint: str,
         dispatch_id: str,
+        family: str | None = None,
+        effort: str | None = None,
     ) -> ProfileCalibrationRecord:
         if level == ModelLevel.NONE:
             raise ValueError("NONE has no end-to-end profile calibration")
@@ -183,6 +186,14 @@ class ProfileCalibrationRegistry:
             raise ValueError(f"{level.value} switch must be verified before end-to-end calibration")
         if record.ui_fingerprint != ui_fingerprint:
             raise ValueError("profile calibration is stale for the current UI fingerprint")
+        if family is not None and record.family != family:
+            raise ValueError(
+                f"executed family {family!r} does not match calibrated family {record.family!r}"
+            )
+        if effort is not None and record.effort != effort:
+            raise ValueError(
+                f"executed effort {effort!r} does not match calibrated effort {record.effort!r}"
+            )
 
         updated = ProfileCalibrationRecord(
             level=record.level,
