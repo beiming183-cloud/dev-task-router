@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from .local_review import IndependentLocalReviewer
 from .local_session import LocalCycleResult, LocalTaskCycle
 from .models import Plan, TaskSpec, TaskStatus, WorkflowStatus
 from .state import StateStore, now_iso
+from .usage import UsageLogger
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +55,7 @@ class LocalProjectLoop:
     """
 
     CONTINUE_STATUSES = {"PASSED", "CHECK_FAILED", "REVIEW_FAILED"}
+    USAGE_TERMINAL_STATUSES = {"PASSED", "CHECK_FAILED", "REVIEW_FAILED", "FAILED", "BLOCKED"}
 
     def __init__(
         self,
@@ -86,6 +89,7 @@ class LocalProjectLoop:
             evidence=self.evidence,
             sessions=getattr(cycle, "sessions", None),
         )
+        self.usage = UsageLogger(root)
         self.handoff = HandoffWriter(root)
 
     def _task(self, task_id: str) -> TaskSpec | None:
@@ -144,6 +148,51 @@ class LocalProjectLoop:
             except (OSError, RuntimeError, ValueError):
                 return
         self.e2e_calibration.try_record(task, result.dispatch_id)
+
+    @staticmethod
+    def _duration_since(value: object) -> float | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            started = datetime.fromisoformat(value)
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            return max(0.0, (datetime.now(timezone.utc) - started).total_seconds())
+        except ValueError:
+            return None
+
+    def _record_model_usage(self, result: LocalCycleResult) -> None:
+        if (
+            result.status not in self.USAGE_TERMINAL_STATUSES
+            or not result.task_id
+            or not result.dispatch_id
+        ):
+            return
+        sessions = getattr(self.cycle, "sessions", None)
+        if sessions is None:
+            return
+        session = sessions.get(result.dispatch_id)
+        if not isinstance(session, dict):
+            return
+        state = self.store.ensure_for_plan(self.plan)
+        item = state["tasks"].get(result.task_id)
+        if not isinstance(item, dict):
+            return
+        route = item.get("route") if isinstance(item.get("route"), dict) else {}
+        check = session.get("check") if isinstance(session.get("check"), dict) else {}
+        self.usage.append(
+            task_id=result.task_id,
+            route=route,
+            status=result.status,
+            returncode=check.get("returncode"),
+            attempt=int(item.get("attempts", 0)),
+            phase="MODEL_TASK",
+            failure_type=(str(item.get("last_failure_type")) if item.get("last_failure_type") else None),
+            duration_seconds=self._duration_since(session.get("created_at")),
+            dispatch_id=result.dispatch_id,
+            source="local-conversation",
+            usage_id=f"dispatch:{result.dispatch_id}:final",
+        )
 
     def _reopen_debug_source_after_pass(self, result: LocalCycleResult) -> None:
         if result.status != "PASSED" or not result.task_id:
@@ -216,6 +265,7 @@ class LocalProjectLoop:
 
         self._record_verified_pass(result)
         self._record_e2e_profile_calibration(result)
+        self._record_model_usage(result)
         self._reopen_debug_source_after_pass(result)
         return result
 
