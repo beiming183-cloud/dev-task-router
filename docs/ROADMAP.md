@@ -2,11 +2,37 @@
 
 ## 总原则
 
-项目主线：**ChatGPT / Codex Plugin + Skills → 内容级难度判断 → Surface 路由 → GitHub 真实上下文 → 同会话精确切换 + Rolling Context → 本地自动执行闭环 → recovery / evidence / audit。**
+项目主线：**ChatGPT / Codex Plugin + Skills → 内容级难度判断 → Surface 路由 → GitHub 真实上下文 → 同会话精确切换 + Rolling Context → 本地自动执行闭环 → recovery / evidence / audit → V1.0 readiness。**
 
-V1.0 前继续保持轻量，不要求自建服务器、数据库集群、VS Code Extension 或 Agent Swarm。
+V1.0 继续保持轻量：不要求自建服务器、数据库集群、VS Code Extension 或 Agent Swarm。
 
-核心产品约束：**Task decomposition 不等于 conversation decomposition。** 复杂项目默认保持一个 canonical conversation；简单 Task 用低推理，复杂 Task 用高推理，优先在同一会话原地切换 execution profile。
+核心产品约束：
+
+```text
+Task decomposition != conversation decomposition
+```
+
+复杂项目默认保持一个 canonical conversation；简单 Task 用较低 reasoning profile，复杂 Task 用较高 reasoning profile。Task 切换不要求用户开多个聊天窗口。
+
+难度与执行面继续分层：
+
+```text
+Task / repo evidence
+→ Difficulty: NONE / LOW / MEDIUM / HIGH
+→ Surface / execution backend
+→ concrete requested profile
+→ actual profile verification
+```
+
+首次按预测难度直接分配，不做 weak-first。只有真正 implementation / reasoning / Checker / Reviewer failure 才允许：
+
+```text
+LOW failure    → MEDIUM
+MEDIUM failure → HIGH
+HIGH failure   → HIGH retry / BLOCKED
+```
+
+网络、权限、selector、UI drift、response timeout、reviewer transport、GitHub sync 等基础设施失败不提升 Difficulty。
 
 ---
 
@@ -22,33 +48,17 @@ V1.0 前继续保持轻量，不要求自建服务器、数据库集群、VS Cod
 
 完成 Checker、Reviewer、Retry、Escalation、BLOCKED、失败历史和人工 retry。
 
-```text
-LOW failure    → MEDIUM
-MEDIUM failure → HIGH
-HIGH failure   → HIGH retry / BLOCKED
-```
-
-首次仍按预测难度直接分配；这不是 weak-first。
-
----
-
 ## V0.4 — ChatGPT / Codex Plugin + Skill 化 ✅
 
 完成 Skill-only Plugin、marketplace、Plugin package 回归测试和 Python package `0.4.0`。
 
 验证：**23 passed**。
 
----
-
 ## V0.5 — 内容级复杂度判断 + Surface Router ✅
 
 完成 `DifficultyClassifier / DifficultyAssessment`、Task 拆分停止条件、`SurfaceCatalog / SurfaceDecision`、`route-model` Skill，以及 Chat / Codex / Work 的分层路由配置。
 
-不猜 Lunar / Terra / Sol / Astra 强弱顺序。
-
 完整回归：**29 passed**。
-
----
 
 ## V0.6 — GitHub 真实仓库上下文 ✅
 
@@ -65,13 +75,11 @@ User request    = 目标状态
 
 ---
 
-## V0.7 — Same-Conversation Foundation 🚧 Draft
+## V0.7 — Same-Conversation Foundation 🚧 Draft PR #7
 
-目标：让复杂项目长期保持**同一个 canonical ChatGPT conversation**，同时支持按 Task 切 reasoning profile，并控制长项目上下文。
+完成自动可验证部分：
 
-### A. Local Exact Mode Switch
-
-已实现 candidate：
+### Local Exact Mode Switch
 
 - `RequestedProfile / SwitchResult`
 - `ModeSwitchController / ModeSwitchBackend`
@@ -86,13 +94,8 @@ User request    = 目标状态
 - 默认禁用，必须先校准
 - `verified: true` 才认为切换成功
 - MODE_SWITCH 基础设施失败不提升 Difficulty
-- Skill：`switch-local-mode`
 
-Windows 真机校准由用户暂缓，因此 PR #7 保持 Draft；其余自动可验证开发继续推进。
-
-### B. Rolling Project Context / Task Context Pack
-
-已实现：
+### Rolling Project Context / Task Context Pack
 
 - `.autodev/context.yaml`
 - `RollingProjectContext / ContextBudget`
@@ -102,162 +105,61 @@ Windows 真机校准由用户暂缓，因此 PR #7 保持 Draft；其余自动�
 - commit-anchor stale detection
 - repository facts/files/CI budgets
 - recent failures / acceptance budgets
-- `autodev context / context-pack`
 - handoff 使用 **Next Task Context Pack first**
 - PASSED 历史任务不反复展开
-- Skill：`build-context-pack`
+
+Windows 真机 LOW/MEDIUM/HIGH 校准由用户暂缓，因此 PR #7 保持 Draft。
 
 ---
 
-## V0.8 — 本地同会话自动执行闭环 🚧 Draft
+## V0.8 — 本地同会话自动执行闭环 🚧 Draft PR #8
 
-V0.8 是 stacked Draft PR #8，base 为 V0.7 branch。自动可验证 candidate 已从“发送前 gate”推进到完整本地状态机骨架。
-
-### A. Execution gate ✅
+完成自动可验证部分：
 
 ```text
 Task Ready
 → fresh Context Pack
 → Difficulty / requested profile
 → actual-profile verification
-→ dispatch gate
+→ safe current-conversation submit
+→ resumable response collection
+→ Checker / Git evidence
+→ bounded continuous loop
 ```
 
-阻塞：
+### 关键语义
 
-```text
-STALE_CONTEXT
-ROUTE_UNRESOLVED
-MODE_SWITCH_UNAVAILABLE
-MODE_SWITCH
-PROFILE_MISMATCH
-```
-
-基础设施失败不增加 attempts。
-
-### B. Safe current-conversation sender ✅ code / ⏸ live validation
-
-已实现：
-
-- `WindowsUIAConversationBackend`
-- 当前可见 ChatGPT conversation
-- composer selector
-- full prompt write/read-back verification
-- Send selector
-- 禁止固定坐标
-- `.autodev/local-dispatch.json`
-- sticky submitting/submitted duplicate guard
-- duplicate check before touching UI
-
-默认关闭；Windows 真机 selector 尚未校准。
-
-### C. Response monitor / resume ✅ code / ⏸ live validation
-
-已实现：
-
-- `ResponseSnapshot`
-- compact `ResponseBaseline`
-- `ConversationResponseMonitor`
-- `LocalResponseConfig`
-- `WindowsUIAResponseSnapshotSource`
-- conservative stable-response completion
-- `.autodev/local-sessions.json`
-- `.autodev/local-responses/`
-- `WAITING_RESPONSE`
-- same-dispatch resume without resend
-- `CHECKED` crash recovery idempotency
-
-Response baseline 只保存 message count + latest-message SHA-256，不保存整个旧 conversation。
-
-### D. Checker / failure semantics ✅
-
+- stale context / unresolved route / unverified profile 全部 fail closed；
+- composer 写入必须 read-back 一致后才 Send；
+- `.autodev/local-dispatch.json` 防重复提交；
+- response baseline 只保存 message count + latest digest，不保存完整聊天；
+- `WAITING_RESPONSE` 可 resume，不重新发送；
 - response completed 不等于 PASS；
-- assistant 自称完成不等于 PASS；
-- Checker / Git evidence 才决定 Task；
-- `require_diff` 使用 compact pre-dispatch Git snapshot digest；
-- UI / response timeout 不消耗模型 attempt；
-- 真正 CHECK/DIFF failure 才触发下一次 Difficulty promotion；
-- `REVIEW_REQUIRED` 保持独立 Review 边界，不用同一 conversation 假装独立 reviewer。
+- Checker / require_diff 才能决定 Task；
+- UI / response 基础设施失败不消耗模型 attempt；
+- `REVIEW_REQUIRED` 保持独立 Review 边界；
+- bounded `continue --max-cycles` 防无限执行。
 
-### E. Rolling Context delta ✅
-
-PASS 后只写入机器验证事实：
+### Deterministic NONE
 
 ```text
-Verified PASS <task>
-Checker verified
-short dispatch id
+NONE command PASS → next Task
+NONE command FAIL → DEBUG_TASK_REQUIRED → stop
 ```
 
-不从 assistant prose 自动生成 durable decision/constraint，不自动移动 `last_commit`。新 Task 每次 prepare 都重新读取 rolling/repository context，并同步刷新 handoff。
+失败的 NONE 不提升模型，也不自动重复执行。
 
-### F. Deterministic NONE ✅
-
-成功：
-
-```text
-NONE command → checks → PASS → next Task
-```
-
-失败：
-
-```text
-NONE command → DEBUG_TASK_REQUIRED → stop
-```
-
-失败的 NONE 不提升到 LOW/MEDIUM/HIGH，也不会自动重复执行；调试必须作为独立 Task 重新分类。
-
-### G. Bounded continuous loop ✅
-
-CLI：
-
-```text
-autodev-local run --json
-autodev-local resume --json
-autodev-local continue --max-cycles 10 --json
-```
-
-可继续：
-
-```text
-PASSED
-CHECK_FAILED → promoted retry
-successful deterministic NONE
-```
-
-必须停止：
-
-```text
-WAITING_RESPONSE
-RECOVERY_REQUIRED
-REVIEW_REQUIRED
-DEBUG_TASK_REQUIRED
-FAILED / BLOCKED
-infrastructure failure
-```
-
-`max_cycles` 防止无限运行。
-
-V0.8 candidate 自动回归达到 **89 passed**。这不是 Windows ChatGPT 真机验收，PR #8 仍保持 Draft。
+V0.8 candidate 自动回归达到 **89 passed**；Windows live selectors 仍未验收。
 
 ---
 
-## V0.9 — Execution Evidence / Recovery / Repository Sync 🚧 Draft candidate
+## V0.9 — Execution Evidence / Recovery / Repository Sync 🚧 Draft PR #9
 
-V0.9 的目标是让 V0.8 的本地执行状态机在真实长期运行中具备**可恢复、可审计、可与远端事实对齐**的能力，而不是通过更激进的自动化掩盖不确定性。
+V0.9 让 V0.8 的本地执行状态机具备长期运行所需的可恢复、可审计和远端事实对齐能力。
 
-### A. Append-only execution evidence ✅
+### Append-only execution evidence
 
-已实现：
-
-- `.autodev/execution-evidence.jsonl`；
-- compact event，不复制完整 chat history；
-- SHA-256 hash chain；
-- model execution 与 deterministic NONE 都能写 evidence；
-- 幂等 event key，恢复时不重复追加同一边界证据；
-- `autodev-local evidence` 查看/验链。
-
-典型边界：
+`.autodev/execution-evidence.jsonl` 使用 SHA-256 hash chain，compact 记录：
 
 ```text
 PREPARED
@@ -267,9 +169,9 @@ PREPARED
 → STATE_RECORDED
 ```
 
-### B. PREPARED / ambiguous-send reconciliation ✅ code / ⏸ live selector validation
+记录幂等，不复制完整 chat history。
 
-`LocalRecoveryController` 按 durable ordering 保守判断：
+### Conservative recovery
 
 ```text
 PREPARED + no reservation → SAFE_RETRY
@@ -278,124 +180,166 @@ PREPARED + submitting + verified post-baseline activity → RESUME
 PREPARED + submitting + no proof                        → AMBIGUOUS
 ```
 
-`AMBIGUOUS` 不会自动 resend。selector/response source 不可用也不会被解释成“肯定没发”。
+未知发送边界不猜测、不自动 resend。
+
+### Audit / Reviewer / Repository sync
+
+- `autodev-local audit` 交叉检查 evidence/session/dispatch/response digest/workflow；
+- canonical ChatGPT conversation 不能冒充独立 Reviewer；
+- reviewer infrastructure failure 不增加实现 attempt；
+- 本地 PASS 不自动移动 `last_commit`；
+- `sync-repository` 只有在 CI success + local HEAD match + clean business worktree 时推进仓库 anchor。
+
+V0.9 自动验收：branch CI + real `refs/pull/9/merge` CI 均通过，**127 passed**。Windows UIA live validation 仍保留到 V1.0 release gate。
+
+---
+
+# V1.0 — 第一版正式发布 🚧 Readiness Draft
+
+目标不是继续堆新功能，而是把 V0.7/V0.8/V0.9 收敛成明确的发布判定。
+
+## A. Readiness 三层门禁 ✅ code
+
+```text
+automated_ready
+live_windows_ready
+release_ready = automated_ready && live_windows_ready
+```
+
+Linux CI 只能证明 automated readiness，不能冒充 Windows live readiness。
+
+## B. UI Fingerprint / Selector Drift Guard ✅ code / ⏸ live baseline
+
+已实现：
+
+- privacy-safe `UIFingerprint`；
+- 只跟踪项目真实依赖的 mode/effort/composer/Send/response selector；
+- 不把聊天正文和动态消息控件纳入 fingerprint；
+- baseline 存在后，真实 mode switch 前先 probe；
+- MATCH 才继续，DRIFT / PROBE_FAILED fail closed；
+- UI drift 属于 infrastructure failure，不增加 attempt。
 
 CLI：
 
 ```text
-autodev-local recover --json
+autodev-readiness fingerprint --json
+autodev-readiness fingerprint --record --json
 ```
 
-### C. Cross-crash-point idempotent recovery ✅
+## C. LOW / MEDIUM / HIGH Profile Calibration ✅ code / ⏸ live calibration
 
-已覆盖：
+- 只有真实 `SwitchResult.verified=True` 才能写 calibration；
+- profile calibration 与 UI fingerprint 绑定；
+- UI drift 后旧 calibration 自动 stale；
+- `autodev-mode calibrate-profile LOW|MEDIUM|HIGH` 没有 dry-run 伪成功路径。
 
-- response file 已写、session metadata 尚未提交；
-- Checker 已完成、session 尚未推进；
-- workflow terminal state 已持久化、session 仍停在旧状态；
-- 同一 `local_dispatch_id` 重放不会重复增加 attempts/failures/route history。
+## D. End-to-End Calibration Evidence ✅ code / ⏸ live runs
 
-### D. Execution consistency audit ✅
-
-`autodev-local audit --json` 交叉检查：
-
-- evidence chain；
-- response digest；
-- session ↔ dispatch ledger；
-- workflow `local_dispatch_id` ↔ session/evidence；
-- terminal workflow state ↔ recoverable session state。
-
-可恢复的 write lag 可以是 warning；digest/identity corruption 必须 fail closed。
-
-### E. Independent Reviewer execution boundary ✅
-
-同一个 canonical ChatGPT conversation 不能冒充独立 Reviewer。
-
-自动 Review 只有在显式配置独立外部 reviewer executor 时才能通过 gate。默认 disabled。
-
-语义：
+Registry 不能自证 `end_to_end_verified`。Readiness 会反查：
 
 ```text
-verified reviewer FAIL → genuine verification failure
-reviewer transport/process/protocol failure → infrastructure failure
+SUBMITTED
+RESPONSE_COLLECTED
+CHECKED(ok=true)
+STATE_RECORDED(PASSED)
 ```
 
-基础设施 reviewer failure 不增加新的实现 attempt。
+并验证 evidence chain、session、response digest、profile identity；Review Task 还必须有 `REVIEWED: PASS`。
 
-### F. Repository execution evidence synchronization ✅
+## E. Deterministic Failure → Debug Task 完整 UX ✅
 
-本地 PASS 不自动移动 `last_commit`。
-
-`autodev-local sync-repository --json` 只有在以下事实同时成立时才推进 repository anchor：
+已从“只生成 candidate”推进到完整闭环：
 
 ```text
-repo-context commit exists
-CI == success
-local HEAD == repo-context commit
-business worktree clean
+NONE failure
+→ materialize debug candidate
+→ explicit activate-debug
+→ independent classification
+→ debug PASS
+→ reopen original NONE source
+→ rerun original deterministic command/check
 ```
 
-这样不会把未 commit/push 的本地修改误认为 GitHub 已验证事实。
+约束：
 
-### G. Recovery Skill / 0.9.0 packaging ✅
+- source NONE 不提升模型；
+- debug Task 不允许预设 level/model；
+- plan 只允许追加新 Task；
+- 删除已有 durable Task state 仍 fail closed；
+- debug Task 插到 source 前；
+- source 原 attempts/failures/route history 保留；
+- debug PASS 不能伪造 source PASS，必须再跑原命令。
 
-- Python package metadata → `0.9.0`；
-- Plugin manifest → `0.9.0`；
-- Skill：`recover-execution`；
-- `docs/V0.9.md`；
-- Plugin/package regressions 更新。
-
-### H. Automated acceptance ✅ / live calibration ⏸
-
-V0.9 package/Plugin candidate 已完成自动验收：
+CLI：
 
 ```text
-branch CI: 127 passed
-PR #9 real refs/pull/9/merge CI: 127 passed
+autodev-local activate-debug [task_id] --json
 ```
 
-为支持 stacked PR 的真实 merge-ref 验收，直接 base `feature/v0.8-local-loop` 的 CI-only workflow 也已允许 `pull_request` target `feature/**`。V0.9 head 已把该 base commit 纳入 ancestry，最终 compare 状态为 `ahead`、`behind_by=0`。
+## F. Usage / Time / Token / Outcome Calibration ✅
 
-仍待 V1.0 readiness / 不作为本轮自动验收阻塞项：
+已实现真实、保守的描述性统计：
 
-- 用户机器真实 ChatGPT Windows selector drift/live calibration；
-- LOW/MEDIUM/HIGH real-profile end-to-end switching；
-- composer/Send/assistant-message live selectors；
-- 更长期的 predicted difficulty → actual success/failure calibration；
-- usage/token/time metrics 与减少无意义 HIGH；
-- deterministic failure → 自动 materialize debug Task 的完整 UX。
+- deterministic command/check 使用 monotonic elapsed time；
+- model Task 使用 durable session wall-clock window；
+- `usage_id` 防 crash/replay 重复计量；
+- UI backend 拿不到 provider token 时必须保持 `null`；
+- 只有 provider/API 实际返回 usage 时才写 token；
+- 按 initial level 统计 pass/fail/blocked、attempts、one-shot pass、duration coverage、token coverage；
+- 统计 promotion、HIGH-first、promoted-to-HIGH；
+- `HIGH-first + one-shot PASS` 只生成 `high_manual_review_candidates`，不自动降档，不表示 lower profile 一定成功；
+- calibration report 为只读，不刷新 workflow timestamp、不自动初始化 Task state。
 
-API Provider 仍可作为可选执行层，不强绑 OpenAI；DeepSeek/其他 provider adapter 应保持 vendor-neutral，并且必须配合受控工具/patch/checker，而不是把“调用模型 API”误认为“代码已经修改”。
+CLI：
 
----
+```text
+autodev-readiness calibration --json
+```
 
-## V1.0 — 第一版正式发布
+## G. 自动验收 ✅
 
-目标能力：
+V1.0 readiness branch 当前自动回归：
 
-- 一个复杂项目对应一个 canonical conversation；
-- Project / Stage / Step / Task；
-- 自动内容级难度分类；
-- Surface-aware routing；
-- Windows 本地 exact mode switching；
-- requested/actual profile 验证；
-- GitHub 真实上下文；
-- Rolling Project Context + Task Context Pack；
-- safe submit / response resume；
-- execution evidence / audit / crash recovery；
-- Checker / independent Reviewer / failure reclassification；
-- strict repository anchor sync；
-- deterministic NONE；
-- bounded local continuous execution；
-- pause / resume / recovery。
+```text
+154 passed
+```
 
-不作为 V1.0 阻塞项：云端 exact mode switch、自建服务器、多用户、VS Code UI、Agent Swarm。
+这证明 state machine / evidence / debug activation / usage / calibration / readiness 逻辑通过自动测试，**不证明 Windows ChatGPT 客户端已经 live-verified**。
+
+## H. Windows Live Release Gate ⏸ 用户机器
+
+正式 V1.0 发布前仍需：
+
+```text
+[ ] record target Windows UI fingerprint
+[ ] selector drift = MATCH
+[ ] LOW exact switch verified
+[ ] MEDIUM exact switch verified
+[ ] HIGH exact switch verified
+[ ] composer write/read-back verified
+[ ] Send verified
+[ ] assistant response completion verified
+[ ] LOW end-to-end PASS evidence
+[ ] MEDIUM end-to-end PASS evidence
+[ ] HIGH end-to-end PASS evidence
+[ ] autodev-readiness readiness --probe-ui => release_ready=true
+```
+
+在此之前：
+
+- V1.0 PR 保持 Draft；
+- package/plugin 不提前宣称正式 `1.0.0`；
+- 文档使用 `V1.0 readiness candidate`；
+- 不把 CI green 写成 live Windows complete。
 
 ---
 
 # 当前下一步
 
-1. 保持 stacked Draft PR #9，不因自动回归通过而冒充 Windows live validation 已完成。
-2. 用户恢复 Windows 真机校准后，完成 model/effort/composer/Send/response selector 的真实端到端验收。
-3. 基于真实运行证据补 predicted difficulty → actual outcome calibration、usage/token/time metrics，并减少无意义 HIGH。
-4. 收敛 V0.7/V0.8/V0.9 stacked chain，准备 V1.0 正式发布验收。
+1. 建立 `feature/v1.0-readiness` stacked Draft PR，base 指向 V0.9 branch。
+2. 对 Draft PR 跑真实 merge-ref CI，确认 V1.0 自动可验证部分在 stacked base 上仍绿。
+3. 用户恢复 Windows 真机校准时，依次完成 fingerprint → LOW/MEDIUM/HIGH switch → composer/Send/response → 三档 e2e calibration。
+4. 只有 `release_ready=true` 后才进入正式 `1.0.0` package/plugin bump、Ready for Review 和最终 merge/release。
+5. 真实运行积累足够样本后，再考虑受控 lower-profile A/B calibration；V1.0 不从少量 HIGH one-shot success 自动调低阈值。
+
+不作为 V1.0 阻塞项：云端 exact mode switch、自建服务器、多用户、VS Code UI、Agent Swarm。
