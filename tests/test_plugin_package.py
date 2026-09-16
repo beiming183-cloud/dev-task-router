@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PLUGIN = ROOT / "plugins" / "dev-task-router"
+
+
+def test_plugin_manifest_and_marketplace_are_valid() -> None:
+    manifest_path = PLUGIN / ".codex-plugin" / "plugin.json"
+    marketplace_path = ROOT / ".agents" / "plugins" / "marketplace.json"
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+
+    assert manifest["name"] == "dev-task-router"
+    assert manifest["version"] == "0.4.0"
+    assert manifest["skills"] == "./skills/"
+    assert "mcpServers" not in manifest
+    assert "apps" not in manifest
+    assert manifest["interface"]["displayName"] == "项目拆解器"
+
+    plugins = marketplace["plugins"]
+    assert len(plugins) == 1
+    assert plugins[0]["name"] == "dev-task-router"
+    assert plugins[0]["source"]["path"] == "./plugins/dev-task-router"
+
+
+def test_required_skills_have_frontmatter_and_correct_routing_policy() -> None:
+    required = {
+        "index",
+        "decompose-project",
+        "classify-task",
+        "create-handoff",
+    }
+
+    for skill_name in required:
+        path = PLUGIN / "skills" / skill_name / "SKILL.md"
+        assert path.exists(), f"missing {path}"
+        text = path.read_text(encoding="utf-8")
+        assert text.startswith("---\nname:"), f"missing frontmatter in {path}"
+        assert "description:" in text.split("---", 2)[1]
+
+    index_text = (PLUGIN / "skills" / "index" / "SKILL.md").read_text(encoding="utf-8")
+    assert "LOW failure    → MEDIUM" in index_text
+    assert "MEDIUM failure → HIGH" in index_text
+    assert "weak-first" in index_text
+
+    decompose_text = (PLUGIN / "skills" / "decompose-project" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Project → Stage → Step → Task" in decompose_text
+    assert "escalate_after: 1" in decompose_text
