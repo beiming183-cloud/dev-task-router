@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import load_rolling_context, save_rolling_context
+from .handoff import HandoffWriter
 from .local_session import LocalCycleResult, LocalTaskCycle
 from .models import Plan
 from .state import StateStore, now_iso
@@ -51,6 +52,7 @@ class LocalProjectLoop:
         self.plan = plan
         self.store = store
         self.cycle = cycle
+        self.handoff = HandoffWriter(root)
 
     def _task_title(self, task_id: str) -> str:
         for task in self.plan.tasks:
@@ -85,6 +87,7 @@ class LocalProjectLoop:
         # Do not advance last_commit here. Local file changes may not yet have a fresh
         # repository evidence anchor; stale detection must remain conservative.
         save_rolling_context(self.root, rolling)
+        self.handoff.write(self.plan, self.store.ensure_for_plan(self.plan))
 
     def run_one(self) -> LocalCycleResult:
         result = self.cycle.run_next()
