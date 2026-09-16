@@ -20,7 +20,7 @@ V1.0 前保持轻量，不要求自建服务器、数据库集群、VS Code Exte
 
 完成 Checker、Reviewer、Retry、Escalation、BLOCKED、失败历史和人工 retry。
 
-V0.3 的升级语义从现在起明确为：**初始分类先直接匹配难度；如果真实执行失败，则把失败视为可能低估难度的证据并向上重新分类。**
+升级语义明确为：**初始分类先直接匹配难度；如果真实执行失败，则把失败视为可能低估难度的证据并向上重新分类。**
 
 ```text
 LOW failure    → MEDIUM
@@ -32,31 +32,24 @@ HIGH failure   → HIGH retry / BLOCKED
 
 ---
 
-## V0.4 — ChatGPT / Codex Plugin + Skill 化 🚧
+## V0.4 — ChatGPT / Codex Plugin + Skill 化 ✅
 
-目标：把“项目拆解器”真正做成 OpenAI Plugin，而不是 VS Code 插件。
-
-当前设计：Skill-only Plugin。
-
-已建立：
+已完成：
 
 - `.agents/plugins/marketplace.json`
 - `plugins/dev-task-router/.codex-plugin/plugin.json`
+- Skill-only Plugin
 - `skills/index/SKILL.md`
 - `skills/decompose-project/SKILL.md`
 - `skills/classify-task/SKILL.md`
 - `skills/create-handoff/SKILL.md`
+- V0.3 升级语义纠正
+- Plugin package 回归测试
+- Python package 升至 `0.4.0`
 
-原则：
+验证：GitHub Actions push / PR merge ref 均通过，完整测试 **23 passed**。
 
-- 不要求自建服务器；
-- 不要求 MCP server；
-- 不要求 `.app.json`；
-- 不绑定 VS Code；
-- 初次按难度直接分配模型档位；
-- 真失败后向上重新分类。
-
-验收标准：Plugin manifest 和所有 Skill 文件结构合法，能被当前 OpenAI Plugin/Skill 体系识别；插件能稳定产出带难度、原因、验收和 handoff 的开发计划。
+V0.4 明确不做：自建服务器、MCP server、`.app.json`、VS Code Extension。
 
 ---
 
@@ -84,6 +77,14 @@ Confidence
 Initial route
 Failure route
 ```
+
+V0.5 还要解决：
+
+- 一个大需求如何自动拆 Stage / Step / Task；
+- 什么情况下不应该继续拆；
+- 如何识别“看起来简单但实际高风险”的任务；
+- 如何根据失败证据修正原始难度判断；
+- 如何避免 HIGH 使用过量。
 
 ---
 
@@ -174,11 +175,13 @@ Task type → predicted difficulty → model → success/fail → promoted tier 
 
 # 当前下一步
 
-先完成 V0.4：
+V0.4 已完成。进入 **V0.5 自动任务拆解与复杂度判断**：
 
-1. 校验 Plugin manifest / marketplace JSON。
-2. 校验所有 Skill frontmatter 和引用路径。
-3. 增加插件包回归测试。
-4. 修正 V0.3 文档中的升级语义。
-5. CI 通过后合并 V0.4。
-6. 然后进入 V0.5 自动任务拆解与复杂度判断。
+1. 定义可解释的复杂度评分维度。
+2. 定义 Task 拆分停止条件。
+3. 把 Stage / Step / Task 自动拆解写进 Skill。
+4. 给每个 Task 输出 Difficulty / Reason / Confidence。
+5. 生成 Initial route / Failure route。
+6. 增加典型简单、中等、复杂、伪简单高风险案例测试。
+7. 检查过度使用 HIGH 的情况。
+8. 让失败证据能反向修正难度分类。
