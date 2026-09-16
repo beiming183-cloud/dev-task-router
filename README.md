@@ -110,7 +110,7 @@ dev-task-router/
 
 ## 当前路线
 
-- **V0.1**：状态机 + YAML 计划 + 单执行器 + CLI 最小闭环
+- **V0.1 ✅**：状态机 + YAML 计划 + 单执行器 + CLI 最小闭环
 - **V0.2**：LOW / MEDIUM / HIGH 多模型路由
 - **V0.3**：Checker + Reviewer + Retry + 模型升级机制
 - **V0.4**：VS Code 轻量面板
@@ -124,13 +124,13 @@ dev-task-router/
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — 分阶段开发路线
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 架构与模块边界
 - [`docs/REFERENCES.md`](docs/REFERENCES.md) — Aider、LiteLLM、OpenHands、Roomote 等设计借鉴说明
-- [`docs/V0.1.md`](docs/V0.1.md) — V0.1 当前实现与使用方法
+- [`docs/V0.1.md`](docs/V0.1.md) — V0.1 实现与使用方法
 
 ## 当前状态
 
-**Status: V0.1 Core implemented on `feature/v0.1-core`**
+**Status: V0.1 Core complete on `main`**
 
-当前已经跑通第一条最小闭环：
+第一条最小闭环已经跑通：
 
 > `plan.yaml` → 校验任务 → 单执行器运行 → checks → 持久化 `state.json` → 下一任务 / FAILED / PASSED。
 
@@ -144,6 +144,8 @@ autodev pause
 autodev resume
 autodev status
 ```
+
+本地测试与 GitHub Actions 均已通过，当前测试集为 **6 passed**。
 
 ---
 
