@@ -5,7 +5,8 @@ from dev_task_router.config import (
     save_rolling_context,
     write_default_files,
 )
-from dev_task_router.models import Plan
+from dev_task_router.handoff import HandoffWriter
+from dev_task_router.models import Plan, TaskStatus
 from dev_task_router.repo_context import RepositoryContext
 from dev_task_router.rolling_context import (
     ContextBudget,
@@ -40,6 +41,42 @@ def _plan() -> Plan:
                                         "copy/paste behavior is unchanged",
                                     ],
                                 }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+def _two_task_plan() -> Plan:
+    return Plan.from_dict(
+        {
+            "version": 3,
+            "project": "demo",
+            "stages": [
+                {
+                    "id": "stage2",
+                    "title": "Stage 2",
+                    "steps": [
+                        {
+                            "id": "cursor",
+                            "title": "Cursor",
+                            "tasks": [
+                                {
+                                    "id": "done-task",
+                                    "title": "Finished setup",
+                                    "kind": "simple_edit",
+                                    "prompt": "Finish setup",
+                                },
+                                {
+                                    "id": "semantic-cursor",
+                                    "title": "Implement semantic cursor",
+                                    "kind": "complex_code",
+                                    "prompt": "Implement semantic cursor movement.",
+                                    "acceptance": ["cursor tests pass"],
+                                },
                             ],
                         }
                     ],
@@ -171,3 +208,31 @@ def test_default_project_persists_empty_rolling_context(tmp_path) -> None:
     loaded = load_rolling_context(tmp_path, project="demo")
     assert loaded.goal.startswith("Keep the same conversation")
     assert loaded.decisions == ("Task decomposition is not conversation decomposition",)
+
+
+def test_handoff_prioritizes_next_task_pack_and_omits_passed_task_rows(tmp_path) -> None:
+    plan = _two_task_plan()
+    write_default_files(tmp_path, "demo")
+    state = StateStore(tmp_path).create(plan)
+    state["tasks"]["done-task"]["status"] = TaskStatus.PASSED.value
+    StateStore(tmp_path).save(state)
+    save_rolling_context(
+        tmp_path,
+        RollingProjectContext.from_dict(
+            {
+                "project": "demo",
+                "goal": "Keep one conversation and preserve interaction semantics.",
+                "constraints": ["Do not break history"],
+            }
+        ),
+    )
+
+    path = HandoffWriter(tmp_path).write(plan, StateStore(tmp_path).load())
+    text = path.read_text(encoding="utf-8")
+
+    assert "## Next Task Context Pack" in text
+    assert "Implement semantic cursor" in text
+    assert "Do not break history" in text
+    assert "same canonical project conversation" in text
+    assert "| stage2 | cursor | EXECUTOR | done-task |" not in text
+    assert "| stage2 | cursor | EXECUTOR | semantic-cursor |" in text
