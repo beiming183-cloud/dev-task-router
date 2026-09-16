@@ -2,7 +2,7 @@
 
 ## 总原则
 
-项目主线：**ChatGPT / Codex Plugin + Skills → 内容级难度判断 → Surface 路由 → GitHub 真实上下文 → 执行集成。**
+项目主线：**ChatGPT / Codex Plugin + Skills → 内容级难度判断 → Surface 路由 → GitHub 真实上下文 → Context 优化 → 执行集成。**
 
 V1.0 前继续保持轻量，不要求自建服务器、数据库集群、VS Code Extension 或 Agent Swarm。
 
@@ -68,11 +68,9 @@ HIGH failure   → HIGH retry / BLOCKED
 
 ---
 
-## V0.6 — GitHub Plugin/App 联动与真实仓库上下文 🚧
+## V0.6 — GitHub Plugin/App 联动与真实仓库上下文 ✅
 
-目标：让分类和拆解不再只依赖用户描述，而是使用真实仓库事实。
-
-当前 candidate 已实现：
+完成：
 
 - `RepositoryContext`
 - `.autodev/repo-context.yaml`
@@ -88,6 +86,7 @@ HIGH failure   → HIGH retry / BLOCKED
 - handoff 写入 repository / branch / commit / PR / CI / relevant files / facts
 - 新 Skill：`inspect-repository`
 - `decompose-project / classify-task / create-handoff / index` repository-aware
+- 测试文件不计入业务 module_count，避免虚假跨模块升级
 - Plugin / Python package `0.6.0`
 - `docs/V0.6.md`
 
@@ -100,28 +99,30 @@ User request    = 目标状态
 
 不扫描整个仓库；优先 commit-anchored、task-specific evidence。
 
-最新 branch CI：**36 passed**。
-
-V0.6 合并验收：PR CI 继续通过，合并后 main 回归通过，再标记 ✅。
+验证：branch CI + PR merge-ref CI 均通过，完整回归 **37 passed**。PR #6 已 squash merge 到 `main`。
 
 ---
 
-## V0.7 — Context / Handoff 优化
+## V0.7 — Context / Handoff 优化 🚧
 
-目标：切模型、切对话时只携带必要上下文，同时避免证据过旧或重复传输。
+目标：切模型、切对话、切执行阶段时只携带必要上下文，同时避免证据过旧、重复发送或上下文越滚越大。
 
 计划：
 
 - relevant-files 最小集合进一步裁剪；
-- verified facts 去重；
-- 不可破坏约束；
-- failure evidence；
-- acceptance criteria；
-- next action；
+- verified facts 去重与 provenance；
+- 不可破坏约束单独持久化；
+- failure evidence 压缩；
+- acceptance criteria 精简；
+- exact next action；
 - Context Budget；
 - stale evidence detection；
 - task-specific context packs；
-- 防止完整聊天历史和完整仓库反复发送。
+- repository context 与 task context 分层；
+- 防止完整聊天历史和完整仓库反复发送；
+- handoff 可比较/可更新，不每次整份重建。
+
+验收方向：在保留任务正确性和关键约束的前提下，同一项目跨任务传递的上下文明显小于“整段聊天 + 整个仓库摘要”。
 
 ---
 
@@ -187,10 +188,12 @@ Task traits
 
 # 当前下一步
 
-完成 V0.6 合并验收：
+进入 **V0.7 Context / Handoff 优化**：
 
-1. PR CI 通过。
-2. 检查 repository-aware diff 是否只携带必要上下文。
-3. squash merge 到 `main`。
-4. main CI 通过后标记 V0.6 ✅。
-5. 然后进入 V0.7 Context / Handoff 优化。
+1. 定义 Task Context Pack schema。
+2. 对 relevant files / facts / constraints / failures 设置独立预算。
+3. 增加 stale evidence 检测。
+4. 增加 context 去重和增量更新。
+5. 让 handoff 只携带下一 Task 真正需要的内容。
+6. 增加跨多 Task 的 context-size 回归测试。
+7. CI 通过后合并 V0.7。
