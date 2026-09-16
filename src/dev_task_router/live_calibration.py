@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from .config import load_local_switch, load_surfaces
@@ -42,6 +43,72 @@ def capture_windows_ui_fingerprint(root: Path) -> UIFingerprint:
         {"mode": mode_rows, "conversation": conversation_rows},
         tracked_labels=tracked_selector_labels(root),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class UIExecutionGuardResult:
+    allowed: bool
+    status: str
+    message: str
+    baseline_digest: str | None = None
+    current_digest: str | None = None
+
+
+class UIFingerprintExecutionGuard:
+    """Fail closed on a known UI baseline drift before clicking mode controls.
+
+    An absent baseline preserves the pre-V1 behavior: execution may continue using the
+    existing exact-switch verification. Once the user records a baseline, every real
+    Windows dispatch is guarded against selector-structure drift.
+    """
+
+    def __init__(
+        self,
+        root: Path,
+        *,
+        fingerprint_supplier: Callable[[], UIFingerprint] | None = None,
+    ):
+        self.root = root.resolve()
+        self.store = UIFingerprintStore(self.root)
+        self.fingerprint_supplier = fingerprint_supplier
+
+    def check(self) -> UIExecutionGuardResult:
+        baseline = self.store.load()
+        if baseline is None:
+            return UIExecutionGuardResult(
+                allowed=True,
+                status="UNCALIBRATED",
+                message="no UI fingerprint baseline exists; exact switch verification remains authoritative",
+            )
+        try:
+            current = (
+                self.fingerprint_supplier()
+                if self.fingerprint_supplier is not None
+                else capture_windows_ui_fingerprint(self.root)
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            return UIExecutionGuardResult(
+                allowed=False,
+                status="PROBE_FAILED",
+                message=f"could not verify current UI fingerprint: {exc}",
+                baseline_digest=baseline.digest,
+            )
+        comparison = self.store.compare(current)
+        if comparison.drifted:
+            return UIExecutionGuardResult(
+                allowed=False,
+                status="DRIFT",
+                message="current UI fingerprint differs from the calibrated selector structure",
+                baseline_digest=baseline.digest,
+                current_digest=current.digest,
+            )
+        return UIExecutionGuardResult(
+            allowed=True,
+            status="MATCH",
+            message="current UI fingerprint matches the calibrated selector structure",
+            baseline_digest=baseline.digest,
+            current_digest=current.digest,
+        )
 
 
 class LiveProfileCalibrator:
