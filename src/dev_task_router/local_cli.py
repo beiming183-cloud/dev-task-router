@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from .config import load_local_switch, load_surfaces
+from .live_calibration import LiveProfileCalibrator
 from .mode_switch import (
     DryRunModeSwitchBackend,
     ModeSwitchController,
@@ -42,12 +43,8 @@ def cmd_probe(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_switch(args: argparse.Namespace) -> int:
-    root = project_root(args.root)
-    level = ModelLevel(args.level.upper())
-    controller = ModeSwitchController(load_surfaces(root), _backend(root, dry_run=args.dry_run))
-    result = controller.switch_level(level, args.surface)
-    payload = {
+def _switch_payload(result) -> dict:
+    return {
         "requested": {
             "surface": result.requested.surface,
             "level": result.requested.level.value,
@@ -64,6 +61,14 @@ def cmd_switch(args: argparse.Namespace) -> int:
         "backend": result.backend,
         "message": result.message,
     }
+
+
+def cmd_switch(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    level = ModelLevel(args.level.upper())
+    controller = ModeSwitchController(load_surfaces(root), _backend(root, dry_run=args.dry_run))
+    result = controller.switch_level(level, args.surface)
+    payload = _switch_payload(result)
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
@@ -77,6 +82,36 @@ def cmd_switch(args: argparse.Namespace) -> int:
         print(result.message)
     # Exact local mode refuses to report success if the selected profile cannot be verified.
     return 0 if result.verified or args.dry_run else 1
+
+
+def cmd_calibrate_profile(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    level = ModelLevel(args.level.upper())
+    fingerprint, record = LiveProfileCalibrator(root).calibrate(
+        level,
+        surface=args.surface,
+    )
+    payload = {
+        "level": record.level.value,
+        "family": record.family,
+        "effort": record.effort,
+        "switch_verified": record.switch_verified,
+        "end_to_end_verified": record.end_to_end_verified,
+        "ui_fingerprint": fingerprint.digest,
+        "verified_at": record.verified_at,
+        "registry": ".autodev/profile-calibration.json",
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(
+            f"calibrated: {record.level.value} -> {record.family}/"
+            f"{record.effort or 'default'}"
+        )
+        print(f"UI fingerprint: {fingerprint.digest}")
+        print("exact switch verified: yes")
+        print("end-to-end dispatch/response/check verification: pending")
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -97,6 +132,18 @@ def build_parser() -> argparse.ArgumentParser:
     switch.add_argument("--dry-run", action="store_true", help="resolve route but do not touch UI")
     switch.add_argument("--json", action="store_true", help="print result as JSON")
     switch.set_defaults(func=cmd_switch)
+
+    calibrate = sub.add_parser(
+        "calibrate-profile",
+        help="perform a real exact switch and record verified profile calibration for the current UI fingerprint",
+    )
+    calibrate.add_argument(
+        "level",
+        choices=["LOW", "MEDIUM", "HIGH", "low", "medium", "high"],
+    )
+    calibrate.add_argument("--surface", default="chat")
+    calibrate.add_argument("--json", action="store_true")
+    calibrate.set_defaults(func=cmd_calibrate_profile)
     return parser
 
 
