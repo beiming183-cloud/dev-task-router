@@ -6,12 +6,18 @@ import sys
 from pathlib import Path
 
 from .config import load_local_switch, load_plan
+from .conversation_response_ui import (
+    WindowsUIAResponseSnapshotSource,
+    load_local_response_config,
+)
 from .conversation_ui import (
     WindowsUIAConversationBackend,
     load_local_conversation_config,
 )
 from .local_loop import DryRunConversationBackend, LocalConversationOrchestrator
+from .local_session import LocalTaskCycle
 from .mode_switch import DryRunModeSwitchBackend, WindowsUIAModeSwitchBackend
+from .response_monitor import ConversationResponseMonitor
 from .state import StateStore
 
 
@@ -53,6 +59,37 @@ def _orchestrator(
         mode_backend=mode_backend,
         conversation_backend=conversation_backend,
     )
+
+
+def _cycle(root: Path) -> LocalTaskCycle:
+    plan = load_plan(root)
+    store = StateStore(root)
+    orchestrator = _orchestrator(root, switch=True, conversation=True)
+    response_config = load_local_response_config(root)
+    source = WindowsUIAResponseSnapshotSource(root, response_config)
+    monitor = ConversationResponseMonitor(
+        source,
+        poll_interval_seconds=response_config.poll_interval_seconds,
+        timeout_seconds=response_config.timeout_seconds,
+        stable_polls=response_config.stable_polls,
+    )
+    return LocalTaskCycle(root, plan, store, orchestrator, monitor)
+
+
+def _print_cycle(result, *, json_output: bool) -> None:
+    if json_output:
+        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+        return
+    print(f"task: {result.task_id or 'none'}")
+    print(f"status: {result.status}")
+    print(f"dispatch: {result.dispatch_id or 'none'}")
+    print(f"infrastructure failure: {'yes' if result.infrastructure_failure else 'no'}")
+    print(result.message)
+    if result.response is not None:
+        print(f"response completed: {'yes' if result.response.completed else 'no'}")
+        print(f"response polls: {result.response.polls}")
+    if result.check is not None:
+        print(f"checker: {'PASS' if result.check.ok else 'FAIL'}")
 
 
 def cmd_prepare(args: argparse.Namespace) -> int:
@@ -128,6 +165,7 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
         print(f"dispatched: {'yes' if outcome.dispatched else 'no'}")
         if outcome.dispatch is not None:
             print(outcome.dispatch.message)
+            print("low-level dispatch only; response/checker state is not advanced")
         else:
             print(outcome.gate.message)
     if outcome.gate.blocker == "DETERMINISTIC":
@@ -135,10 +173,63 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
     return 0 if outcome.dispatched else 1
 
 
+def cmd_run(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    result = _cycle(root).run_next()
+    _print_cycle(result, json_output=args.json)
+    if result.status in {"PASSED", "DETERMINISTIC", "REVIEW_REQUIRED", "NO_TASK"}:
+        return 0
+    return 1
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    cycle = _cycle(root)
+    task = cycle.orchestrator.next_task()
+    if task is None:
+        payload = {
+            "task_id": "",
+            "status": "NO_TASK",
+            "dispatch_id": None,
+            "infrastructure_failure": False,
+            "message": "workflow has no unresolved task",
+            "response": None,
+            "check": None,
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("workflow has no unresolved task")
+        return 0
+    if cycle.sessions.active_for_task(task.id) is None:
+        payload = {
+            "task_id": task.id,
+            "status": "NO_ACTIVE_SESSION",
+            "dispatch_id": None,
+            "infrastructure_failure": True,
+            "message": "resume refuses to create a new dispatch; use `autodev-local run` for a new Task send",
+            "response": None,
+            "check": None,
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"task: {task.id}")
+            print("status: NO_ACTIVE_SESSION")
+            print(payload["message"])
+        return 1
+
+    result = cycle.run_next()
+    _print_cycle(result, json_output=args.json)
+    return 0 if result.status in {"PASSED", "REVIEW_REQUIRED"} else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="autodev-local",
-        description="Prepare, gate, and safely dispatch the next Task in the canonical local ChatGPT conversation",
+        description=(
+            "Prepare, gate, dispatch, collect and verify the next Task in the canonical local ChatGPT conversation"
+        ),
     )
     parser.add_argument("--root", help="project root; defaults to current directory")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -163,17 +254,31 @@ def build_parser() -> argparse.ArgumentParser:
 
     probe = sub.add_parser(
         "probe-conversation",
-        help="read visible ChatGPT UIA controls for composer/send calibration without clicking",
+        help="read visible ChatGPT UIA controls for composer/send/response calibration without clicking",
     )
     probe.add_argument("--json", action="store_true", help="print probe rows as JSON")
     probe.set_defaults(func=cmd_probe_conversation)
 
     dispatch = sub.add_parser(
         "dispatch",
-        help="after calibration, verify mode gate and submit exactly one prepared Task to the current conversation",
+        help="low-level one-shot submit after gate verification; does not collect or check response",
     )
     dispatch.add_argument("--json", action="store_true", help="print the dispatch result as JSON")
     dispatch.set_defaults(func=cmd_dispatch)
+
+    run = sub.add_parser(
+        "run",
+        help="run one full local Task cycle: gate, send/resume, collect response, then Checker",
+    )
+    run.add_argument("--json", action="store_true", help="print the cycle result as JSON")
+    run.set_defaults(func=cmd_run)
+
+    resume = sub.add_parser(
+        "resume",
+        help="resume an existing submitted/waiting Task only; never creates a new dispatch",
+    )
+    resume.add_argument("--json", action="store_true", help="print the cycle result as JSON")
+    resume.set_defaults(func=cmd_resume)
     return parser
 
 
