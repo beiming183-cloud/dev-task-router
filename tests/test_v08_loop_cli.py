@@ -95,3 +95,20 @@ def test_local_resume_never_creates_a_new_dispatch(tmp_path, capsys) -> None:
     assert "refuses to create a new dispatch" in payload["message"]
     assert StateStore(tmp_path).load()["tasks"]["feature"]["attempts"] == 0
     assert not (autodev_dir(tmp_path) / "local-dispatch.json").exists()
+
+
+def test_local_run_executes_default_deterministic_smoke_without_chat_ui(tmp_path, capsys) -> None:
+    write_default_files(tmp_path, "demo")
+    plan = load_plan(tmp_path)
+    StateStore(tmp_path).create(plan)
+
+    code = main(["--root", str(tmp_path), "run", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    state = StateStore(tmp_path).load()
+
+    assert code == 0
+    assert payload["status"] == "PASSED"
+    assert payload["dispatch_id"] is None
+    assert state["tasks"]["hello"]["status"] == "PASSED"
+    assert state["tasks"]["hello"]["route"]["level"] == "NONE"
+    assert not (autodev_dir(tmp_path) / "local-dispatch.json").exists()
