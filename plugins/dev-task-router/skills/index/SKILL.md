@@ -1,6 +1,6 @@
 ---
 name: dev-task-router-index
-description: "Shared rules for the 项目拆解器 plugin. Use with the other Dev Task Router skills to inspect repository evidence, decompose software work, classify difficulty, route tasks, switch the local ChatGPT execution profile when available, verify results, and create compact handoffs."
+description: "Shared rules for the 项目拆解器 plugin. Use with the other Dev Task Router skills to inspect repository evidence, decompose software work, classify difficulty, route tasks, build compact rolling context packs, switch the local ChatGPT execution profile when available, verify results, and create compact handoffs."
 ---
 
 # 项目拆解器 — Shared Rules
@@ -27,10 +27,10 @@ Do not deliberately start every task on a weak model. The first attempt should u
 
 For a complex project, Task decomposition does **not** imply conversation decomposition.
 
-Prefer one canonical project conversation whenever the execution surface allows it:
+Prefer the same canonical conversation for the whole project whenever the execution surface allows it:
 
 ```text
-same conversation
+same canonical conversation
   ↓
 Task A → LOW
   ↓ local exact switch
@@ -42,6 +42,23 @@ Task C → MEDIUM
 Do not create separate LOW/MEDIUM/HIGH chats merely to obtain different reasoning tiers. The local Windows companion exists specifically to change the current conversation profile while preserving conversation continuity.
 
 A route is only a **requested** profile. When local exact switching is used, execution should continue only after the matching **actual** profile is verified.
+
+A single conversation is still not an infinite context window. Before a long-running task, use `build-context-pack` to combine rolling durable project state with only the task-specific repository evidence needed now. Do not replay the complete chat transcript.
+
+## Rolling context rule
+
+Keep durable information outside the transient chat window in `.autodev/context.yaml`:
+
+- project goal;
+- still-valid architecture/product decisions;
+- protected constraints;
+- current-stage notes;
+- unresolved task-specific notes;
+- the commit anchor for commit-sensitive facts.
+
+The rolling context is a compact state summary, not a second chat log. Deduplicate repeated facts. Old repository-derived facts must be refreshed when their commit anchor is stale.
+
+For the next Task, create a budgeted Task Context Pack containing only applicable decisions, constraints, stage/task notes, acceptance, recent failure evidence, relevant repository files/facts/CI, requested route, and exact next action.
 
 ## Repository evidence before guessing
 
@@ -250,4 +267,4 @@ A handoff should contain only what the next task needs:
 - acceptance criteria;
 - next action.
 
-Do not copy the full chat history or full repository into a handoff.
+Prefer a generated Task Context Pack over copying the full chat history. Do not copy the full chat history or full repository into a handoff.
