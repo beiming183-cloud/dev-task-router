@@ -20,23 +20,29 @@ class StateStore:
     def exists(self) -> bool:
         return self.path.exists()
 
+    @staticmethod
+    def _task_state(task) -> dict[str, Any]:
+        return {
+            "status": TaskStatus.PENDING.value,
+            "attempts": 0,
+            "last_error": None,
+            "started_at": None,
+            "finished_at": None,
+            "stage": task.stage_id,
+            "step": task.step_id,
+            "role": task.role.value,
+            "kind": task.kind,
+            "route": None,
+        }
+
     def create(self, plan: Plan) -> dict[str, Any]:
         state = {
-            "version": 1,
+            "version": 2,
             "project": plan.project,
             "status": WorkflowStatus.READY.value,
             "current_task": None,
             "updated_at": now_iso(),
-            "tasks": {
-                task.id: {
-                    "status": TaskStatus.PENDING.value,
-                    "attempts": 0,
-                    "last_error": None,
-                    "started_at": None,
-                    "finished_at": None,
-                }
-                for task in plan.tasks
-            },
+            "tasks": {task.id: self._task_state(task) for task in plan.tasks},
         }
         self.save(state)
         return state
@@ -64,4 +70,14 @@ class StateStore:
         if expected != actual:
             raise ValueError("plan tasks changed after state creation; remove .autodev/state.json to reinitialize")
 
+        # V0.1 state files remain readable; enrich them in place with V0.2 metadata.
+        state["version"] = 2
+        for task in plan.tasks:
+            task_state = state["tasks"][task.id]
+            task_state["stage"] = task.stage_id
+            task_state["step"] = task.step_id
+            task_state["role"] = task.role.value
+            task_state["kind"] = task.kind
+            task_state.setdefault("route", None)
+        self.save(state)
         return state
