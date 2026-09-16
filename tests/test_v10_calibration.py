@@ -27,8 +27,8 @@ def test_calibration_summarizes_promotions_and_usage_without_changing_policy(tmp
             "started_at": now.isoformat(),
             "finished_at": (now + timedelta(seconds=3)).isoformat(),
             "route_history": [
-                {"attempt": 1, "level": "MEDIUM"},
-                {"attempt": 2, "level": "HIGH"},
+                {"attempt": 1, "level": "MEDIUM", "confidence": "medium"},
+                {"attempt": 2, "level": "HIGH", "confidence": "high"},
             ],
         }
     )
@@ -37,7 +37,9 @@ def test_calibration_summarizes_promotions_and_usage_without_changing_policy(tmp
         {
             "status": "PASSED",
             "attempts": 1,
-            "route_history": [{"attempt": 1, "level": "HIGH"}],
+            "route_history": [
+                {"attempt": 1, "level": "HIGH", "confidence": "medium"}
+            ],
         }
     )
     c = state["tasks"]["c"]
@@ -45,7 +47,7 @@ def test_calibration_summarizes_promotions_and_usage_without_changing_policy(tmp
         {
             "status": "FAILED",
             "attempts": 1,
-            "route_history": [{"attempt": 1, "level": "NONE"}],
+            "route_history": [{"attempt": 1, "level": "NONE", "confidence": "high"}],
             "debug_task_required": True,
         }
     )
@@ -53,8 +55,35 @@ def test_calibration_summarizes_promotions_and_usage_without_changing_policy(tmp
 
     usage = tmp_path / ".autodev" / "usage.jsonl"
     usage.write_text(
-        json.dumps({"task_id": "a", "input_tokens": 100, "output_tokens": 50}) + "\n"
-        + json.dumps({"task_id": "b", "input_tokens": None, "output_tokens": None})
+        json.dumps(
+            {
+                "task_id": "a",
+                "level": "HIGH",
+                "duration_seconds": 4.0,
+                "input_tokens": 100,
+                "output_tokens": 50,
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "task_id": "b",
+                "level": "HIGH",
+                "duration_seconds": 2.5,
+                "input_tokens": None,
+                "output_tokens": None,
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "task_id": "c",
+                "level": "NONE",
+                "duration_seconds": None,
+                "input_tokens": None,
+                "output_tokens": None,
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -66,9 +95,57 @@ def test_calibration_summarizes_promotions_and_usage_without_changing_policy(tmp
     assert report.high_after_promotion_count == 1
     assert report.deterministic_debug_required_count == 1
     assert report.by_initial_level["MEDIUM"].passed == 1
+    assert report.by_initial_level["MEDIUM"].average_attempts == 2.0
+    assert report.by_initial_level["HIGH"].one_shot_passed == 1
+    assert report.by_initial_level["HIGH"].one_shot_pass_rate == 1.0
+    assert report.by_initial_level["HIGH"].duration_records == 2
+    assert report.by_initial_level["HIGH"].duration_seconds == 6.5
+    assert report.by_initial_level["HIGH"].average_duration_seconds == 3.25
+    assert report.by_initial_level["HIGH"].token_records == 1
     assert report.by_initial_level["NONE"].failed == 1
     assert report.observed_terminal_duration_seconds == 3.0
-    assert report.usage_record_count == 2
+    assert report.usage_record_count == 3
+    assert report.duration_record_count == 2
+    assert report.duration_coverage == 2 / 3
+    assert report.observed_execution_duration_seconds == 6.5
     assert report.token_record_count == 1
+    assert report.token_coverage == 1 / 3
     assert report.input_tokens == 100
     assert report.output_tokens == 50
+
+    assert len(report.high_manual_review_candidates) == 1
+    candidate = report.high_manual_review_candidates[0]
+    assert candidate.task_id == "b"
+    assert candidate.confidence == "medium"
+    assert candidate.duration_seconds == 2.5
+    assert "not evidence that a lower profile would have succeeded" in candidate.evidence
+    assert report.to_dict()["policy_changed"] is False
+
+
+def test_high_one_shot_candidate_does_not_modify_task_or_state(tmp_path) -> None:
+    task = TaskSpec(
+        id="high",
+        title="Architecture change",
+        prompt="Design architecture",
+        kind="architecture",
+        level=None,
+    )
+    plan = Plan(project="demo", tasks=[task])
+    store = StateStore(tmp_path)
+    state = store.ensure_for_plan(plan)
+    state["tasks"]["high"].update(
+        {
+            "status": "PASSED",
+            "attempts": 1,
+            "route": {"level": "HIGH"},
+            "route_history": [{"attempt": 1, "level": "HIGH", "confidence": "high"}],
+        }
+    )
+    store.save(state)
+    before = store.load()
+
+    report = OutcomeCalibrator(tmp_path, plan, store).run()
+
+    assert [item.task_id for item in report.high_manual_review_candidates] == ["high"]
+    assert task.level is None
+    assert store.load() == before
