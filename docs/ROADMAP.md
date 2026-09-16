@@ -21,15 +21,11 @@
 - plan/state 一致性保护
 - pytest + GitHub Actions CI
 
-验证：本地与 GitHub Actions 均通过。
-
 ---
 
 ## V0.2 — 任务层级与多模型路由 ✅
 
-目标：让不同类型的任务真正能够被路由到不同等级的 Model Profile / Executor。
-
-已实现：
+已完成：
 
 - Project → Stage → Step → Task
 - V0.1 flat `tasks:` 兼容读取
@@ -37,41 +33,46 @@
 - `TaskRole = PLANNER / EXECUTOR`
 - `.autodev/models.yaml`
 - RuleRouter
-- task.kind 默认路由
 - Task 显式 level 覆盖默认路由
 - Model Profile：provider / model / executor
 - Executor Protocol + Registry
-- `command` Executor
-- 通用 `agent-cli` Executor
+- `command` / `agent-cli` Executor
 - `handoff.md`
 - `usage.jsonl`
-- state 记录 stage / step / role / kind / 实际 route
-- V0.1 项目缺失 models.yaml 时自动补默认配置
-- `autodev models`
-- `autodev handoff`
-- `autodev plan` 显示最终路由
+- state 记录实际 route
+- `autodev models / handoff`
 
-验证：V0.1 回归测试 + V0.2 新测试共 **14 passed**，并用 fake Agent CLI 验证模型名和 prompt 确实传递给被路由的外部执行器。
+验证：V0.1 + V0.2 共 **14 passed**。
 
 详细说明见 [`V0.2.md`](V0.2.md)。
 
 ---
 
-## V0.3 — 验证、重试与模型升级闭环
+## V0.3 — 验证、重试与模型升级闭环 ✅
 
 目标：解决“AI 说完成但实际没完成”，并在便宜模型处理不了时自动升级。
 
-计划功能：
+已实现：
 
-- Checker 抽象
-- Git diff 检查
-- acceptance criteria
-- Reviewer
-- Retry
-- 最大重试次数
-- BLOCKED 状态
-- 失败原因结构化
-- 模型升级策略
+- 独立 `TaskChecker`
+- Task `checks` Gate
+- `require_diff` Git working-tree Gate
+- `acceptance` criteria
+- 独立 Reviewer Gate
+- `TaskRole.REVIEWER`
+- `max_attempts`
+- `escalate_after`
+- `LOW → MEDIUM → HIGH` 升级策略
+- `BLOCKED` Workflow / Task 状态
+- 结构化 `failures[]`
+- `route_history[]`
+- `last_failure_type`
+- `retry_cycles`
+- `autodev retry <task>`
+- `autodev retry <task> --run`
+- Handoff 显示 attempts / route / last failure
+- usage 日志扩展 retry 元数据字段
+- V0.1 / V0.2 状态文件继续可迁移读取
 
 默认升级示例：
 
@@ -81,25 +82,42 @@ MEDIUM fail
 → HIGH
 ```
 
-验收标准：故意制造错误修改，系统必须识别 FAIL；超过重试上限进入 BLOCKED，而不是错误进入 PASSED。
+兼容原则：旧任务未配置 `max_attempts` 时仍默认一次尝试，因此原 V0.1/V0.2 失败语义不被静默改变。
+
+验收已覆盖：
+
+- 第 2 次尝试成功；
+- 第 3 次从 MEDIUM 升到 HIGH；
+- 重试耗尽进入 BLOCKED；
+- require_diff 拒绝“实际没有代码变化”的任务；
+- Reviewer PASS 才能完成；
+- Reviewer FAIL 会重试并最终 BLOCKED；
+- 人工 retry 重置本轮预算但保留失败历史。
+
+当前完整测试集：**21 tests**。
+
+详细说明见 [`V0.3.md`](V0.3.md)。
 
 ---
 
 ## V0.4 — VS Code 轻量插件
 
-目标：让日常使用不需要一直操作 CLI。
+目标：让日常使用不需要一直操作 CLI，同时保持插件本身很轻。
 
-侧栏计划显示：
+计划功能：
 
-- Project / Stage / Step / Task
-- 状态
-- 模型等级与实际 Profile
-- Executor
-- Logs / Diff / Tests
+- VS Code Activity Bar / Side Bar 入口
+- Project / Stage / Step / Task 树
+- 当前 Workflow 状态
+- Task 模型等级与实际 Profile
+- Executor / Attempts / Last failure
+- Logs / Handoff / Tests 快捷入口
+- Continue / Pause / Retry / Stop
+- 调用现有 AutoDev Core / CLI，不在插件中复制工作流逻辑
+- 自动刷新 `.autodev/state.json`
+- Windows / macOS / Linux 基础兼容
 
-按钮：Continue / Pause / Retry / Stop。
-
-原则：VS Code 只做 UI，不复制 Core 逻辑。
+验收标准：用户安装插件后，不打开终端也能完成 `status → start/pause/retry → 查看任务状态` 基础流程。
 
 ---
 
@@ -201,15 +219,15 @@ Task type → Model → Success / Fail → Retry → Cost
 
 # 当前下一步
 
-V0.1 与 V0.2 已完成。进入 V0.3 时优先顺序：
+V0.1、V0.2、V0.3 已完成。下一阶段进入 **V0.4 VS Code 轻量插件**：
 
-1. 定义 Checker 接口和 acceptance criteria。
-2. 实现 Git diff / 文件存在 / 命令退出码等基础 Checker。
-3. 增加 `BLOCKED` 状态。
-4. 增加显式 `retry`。
-5. 增加 max attempts。
-6. 实现模型升级策略。
-7. 加入独立 Reviewer 接口。
-8. 让失败、重试、升级全部写入 usage / handoff。
-9. 增加故意失败的端到端测试。
-10. V0.3 稳定后再做 VS Code UI。
+1. 建立 `vscode/` Extension 骨架。
+2. 调用 `autodev status --json` 获取状态，不复制 Python Core。
+3. 实现 Project / Stage / Step / Task TreeView。
+4. 加入 Start / Pause / Retry 命令。
+5. 显示 Attempts / Model / Executor / Last failure。
+6. 监听 `.autodev/state.json` 自动刷新。
+7. 提供打开 `handoff.md` / `plan.yaml` / `models.yaml` 快捷入口。
+8. 保持无 WebView 的第一版，减少内存与复杂度。
+9. 增加 Extension 单元测试与打包检查。
+10. V0.4 稳定后再进入 GitHub 工程闭环。
