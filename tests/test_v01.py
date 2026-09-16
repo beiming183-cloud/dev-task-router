@@ -98,3 +98,31 @@ def test_pause_and_resume(tmp_path: Path) -> None:
     assert main(["--root", str(tmp_path), "resume"]) == 0
     state = StateStore(tmp_path).load()
     assert state["status"] == "PASSED"
+
+
+def test_missing_command_becomes_failed_state(tmp_path: Path) -> None:
+    write_default_files(tmp_path, "demo")
+    plan_path = autodev_dir(tmp_path) / "plan.yaml"
+    plan_path.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "project": "demo",
+                "tasks": [
+                    {
+                        "id": "missing",
+                        "title": "missing command",
+                        "model": "NONE",
+                        "command": ["__autodev_command_that_does_not_exist__"],
+                    }
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    plan = load_plan(tmp_path)
+    state = WorkflowEngine(tmp_path, plan, StateStore(tmp_path)).run()
+    assert state["status"] == WorkflowStatus.FAILED.value
+    assert state["tasks"]["missing"]["status"] == "FAILED"
+    assert state["tasks"]["missing"]["last_error"]
