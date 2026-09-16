@@ -16,12 +16,13 @@ def test_plugin_manifest_and_marketplace_are_valid() -> None:
     marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
 
     assert manifest["name"] == "dev-task-router"
-    assert manifest["version"] == "0.6.0"
+    assert manifest["version"] == "0.7.0"
     assert manifest["skills"] == "./skills/"
     assert "mcpServers" not in manifest
     assert "apps" not in manifest
     assert manifest["interface"]["displayName"] == "项目拆解器"
     assert "GitHub" in manifest["description"]
+    assert "local" in manifest["description"].lower()
 
     plugins = marketplace["plugins"]
     assert len(plugins) == 1
@@ -36,6 +37,7 @@ def test_required_skills_have_frontmatter_and_correct_routing_policy() -> None:
         "decompose-project",
         "classify-task",
         "route-model",
+        "switch-local-mode",
         "create-handoff",
     }
 
@@ -83,6 +85,14 @@ def test_required_skills_have_frontmatter_and_correct_routing_policy() -> None:
     assert "Chat" in route_text
     assert "Codex / Work" in route_text
     assert "do not invent" in route_text.lower()
+
+    switch_text = (PLUGIN / "skills" / "switch-local-mode" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "same conversation" in switch_text.lower()
+    assert "verified: true" in switch_text
+    assert "no fixed screen coordinates" in switch_text.lower()
+    assert "MODE_SWITCH" in switch_text
 
     handoff_text = (PLUGIN / "skills" / "create-handoff" / "SKILL.md").read_text(
         encoding="utf-8"
