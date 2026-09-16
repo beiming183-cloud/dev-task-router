@@ -3,10 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from dev_task_router.config import save_repository_context, save_rolling_context, write_default_files
-from dev_task_router.local_loop import (
-    ConversationDispatchResult,
-    LocalConversationOrchestrator,
-)
+from dev_task_router.local_loop import ConversationDispatchResult, LocalConversationOrchestrator
 from dev_task_router.mode_switch import RequestedProfile, SwitchResult
 from dev_task_router.models import ModelLevel, Plan
 from dev_task_router.repo_context import RepositoryContext
@@ -34,6 +31,34 @@ def _plan(kind: str = "complex_code") -> Plan:
                                     "acceptance": ["targeted tests pass"],
                                     "max_attempts": 3,
                                     "escalate_after": 1,
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+def _deterministic_plan() -> Plan:
+    return Plan.from_dict(
+        {
+            "version": 3,
+            "project": "demo",
+            "stages": [
+                {
+                    "id": "verify",
+                    "steps": [
+                        {
+                            "id": "tests",
+                            "tasks": [
+                                {
+                                    "id": "task",
+                                    "title": "Run known tests",
+                                    "kind": "test",
+                                    "command": ["python", "-m", "pytest", "-q"],
+                                    "max_attempts": 1,
                                 }
                             ],
                         }
@@ -259,8 +284,8 @@ def test_verified_profile_opens_dispatch_gate_but_does_not_mark_task_passed(tmp_
     assert state["tasks"]["task"]["attempts"] == 0
 
 
-def test_none_task_is_kept_out_of_chat_conversation(tmp_path) -> None:
-    plan = _plan("test")
+def test_real_deterministic_test_command_is_kept_out_of_chat_conversation(tmp_path) -> None:
+    plan = _deterministic_plan()
     store = _root(tmp_path, plan)
     conversation = RecordingConversationBackend()
     orchestrator = LocalConversationOrchestrator(
@@ -274,6 +299,19 @@ def test_none_task_is_kept_out_of_chat_conversation(tmp_path) -> None:
     outcome = orchestrator.dispatch()
 
     assert outcome.gate.envelope.deterministic is True
+    assert outcome.gate.envelope.difficulty == ModelLevel.NONE
     assert outcome.gate.envelope.requested_profile is None
     assert outcome.gate.blocker == "DETERMINISTIC"
     assert conversation.calls == 0
+
+
+def test_test_named_task_with_reasoning_prompt_is_not_forced_to_none(tmp_path) -> None:
+    plan = _plan("test")
+    store = _root(tmp_path, plan)
+    orchestrator = LocalConversationOrchestrator(tmp_path, plan, store)
+
+    envelope = orchestrator.prepare()
+
+    assert envelope.difficulty != ModelLevel.NONE
+    assert envelope.deterministic is False
+    assert envelope.requested_profile is not None
