@@ -72,8 +72,18 @@ class StateStore:
 
         expected = {task.id for task in plan.tasks}
         actual = set(state.get("tasks", {}))
-        if expected != actual:
-            raise ValueError("plan tasks changed after state creation; remove .autodev/state.json to reinitialize")
+        removed = actual - expected
+        if removed:
+            raise ValueError(
+                "plan removed tasks after state creation; refusing to discard durable task state: "
+                + ", ".join(sorted(removed))
+            )
+
+        # V1.0 permits additive Task materialization (for example an independently
+        # classified debug Task). Existing durable Task history is never replaced.
+        for task in plan.tasks:
+            if task.id not in state["tasks"]:
+                state["tasks"][task.id] = self._task_state(task)
 
         # V0.1/V0.2 state files remain readable; enrich them in place.
         state["version"] = 3

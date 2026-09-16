@@ -73,16 +73,22 @@ def test_deterministic_failure_records_debug_boundary_without_model_promotion(tm
     second = runner.run(plan.tasks[0])
     events = evidence.events()
     state = store.load()
+    item = state["tasks"]["unit"]
 
     assert first.status == "DEBUG_TASK_REQUIRED"
     assert second.status == "DEBUG_TASK_REQUIRED"
     assert [event.kind for event in events] == [
         "DETERMINISTIC_STARTED",
         "DETERMINISTIC_COMMAND_COMPLETED",
+        "DEBUG_TASK_MATERIALIZED",
         "STATE_RECORDED",
     ]
     assert events[1].data["returncode"] == 7
-    assert events[2].data["last_failure_type"] == "DETERMINISTIC_COMMAND"
-    assert state["tasks"]["unit"]["route"]["level"] == "NONE"
-    assert state["tasks"]["unit"]["attempts"] == 1
+    assert events[2].data["debug_task_id"] == "unit-debug"
+    assert events[2].data["auto_execute"] is False
+    assert events[3].data["last_failure_type"] == "DETERMINISTIC_COMMAND"
+    assert item["route"]["level"] == "NONE"
+    assert item["attempts"] == 1
+    assert item["debug_task_id"] == "unit-debug"
+    assert (tmp_path / item["debug_task_file"]).exists()
     assert evidence.verify_chain() is True
