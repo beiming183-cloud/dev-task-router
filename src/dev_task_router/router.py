@@ -82,11 +82,25 @@ class RuleRouter:
     def __init__(self, catalog: ModelCatalog):
         self.catalog = catalog
 
-    def route(self, task: TaskSpec) -> RoutingDecision:
+    def decision_for_level(self, level: ModelLevel, reason: str) -> RoutingDecision:
+        return RoutingDecision(level=level, profile=self.catalog.profiles[level], reason=reason)
+
+    def route(
+        self,
+        task: TaskSpec,
+        *,
+        override_level: ModelLevel | None = None,
+        override_reason: str | None = None,
+    ) -> RoutingDecision:
+        if override_level is not None:
+            return self.decision_for_level(
+                override_level,
+                override_reason or f"override:{override_level.value}",
+            )
         if task.level is not None:
             level = task.level
             reason = "explicit task level"
         else:
             level = self.catalog.rules.get(task.kind, ModelLevel.MEDIUM)
             reason = f"rule:{task.kind}" if task.kind in self.catalog.rules else "default:MEDIUM"
-        return RoutingDecision(level=level, profile=self.catalog.profiles[level], reason=reason)
+        return self.decision_for_level(level, reason)
