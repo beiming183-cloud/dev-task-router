@@ -71,12 +71,16 @@ def test_deterministic_failure_requires_separate_debug_task_and_is_not_retried(t
     first = runner.run(plan.tasks[0])
     second = runner.run(plan.tasks[0])
     state = store.load()
+    item = state["tasks"]["unit"]
 
     assert first.status == "DEBUG_TASK_REQUIRED"
     assert second.status == "DEBUG_TASK_REQUIRED"
-    assert "classify it independently" in first.message
-    assert state["tasks"]["unit"]["status"] == "FAILED"
-    assert state["tasks"]["unit"]["last_failure_type"] == "DETERMINISTIC_COMMAND"
-    assert state["tasks"]["unit"]["debug_task_required"] is True
-    assert state["tasks"]["unit"]["attempts"] == 1
+    assert "debug Task" in first.message
+    assert "independently" in first.message
+    assert item["status"] == "FAILED"
+    assert item["last_failure_type"] == "DETERMINISTIC_COMMAND"
+    assert item["debug_task_required"] is True
+    assert item["debug_task_id"] == "unit-debug"
+    assert item["attempts"] == 1
+    assert (tmp_path / item["debug_task_file"]).exists()
     assert (tmp_path / "counter.txt").read_text(encoding="utf-8") == "1"
