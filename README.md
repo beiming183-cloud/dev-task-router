@@ -155,9 +155,9 @@ autodev handoff
 
 ## 当前状态
 
-**Status: V0.3 implemented on `feature/v0.3-verification`, pending final CI / merge.**
+**Status: V0.3 complete on `main`.**
 
-当前完整测试集：**21 tests**。
+GitHub Actions：**21 passed**。
 
 ---
 
