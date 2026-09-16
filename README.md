@@ -133,9 +133,9 @@ autodev handoff
 
 ## 当前状态
 
-**Status: V0.2 implemented on `feature/v0.2-routing`, pending CI / merge.**
+**Status: V0.2 complete on `main`.**
 
-V0.2 本地回归测试：**14 passed**。
+V0.2 本地与 GitHub Actions：**14 passed**。
 
 ---
 
