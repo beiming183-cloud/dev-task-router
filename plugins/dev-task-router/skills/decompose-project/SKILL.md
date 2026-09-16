@@ -42,6 +42,18 @@ handoff/docs          LOW
 
 The actual sequence may differ. Dependency order is more important than alternating tiers.
 
+## Failure handling
+
+Initial routing must come from the predicted task difficulty. If a model-executed task later fails for a genuine reasoning/implementation reason, treat that as evidence that the original classification was too low and promote the next attempt by one tier:
+
+```text
+LOW → MEDIUM → HIGH
+```
+
+Do not promote on infrastructure failures such as missing credentials, permissions, rate limits, unavailable tools, or network errors.
+
+For a HIGH task, a genuine failure stays HIGH; retry only when useful, otherwise mark the task BLOCKED.
+
 ## Output
 
 Start with a compact summary:
@@ -75,12 +87,14 @@ stages:
             kind: <task-kind>
             level: LOW | MEDIUM | HIGH | NONE
             reason: <one-line classification reason>
+            max_attempts: <1-3>
+            escalate_after: 1
             acceptance:
               - <objective acceptance criterion>
             handoff: true | false
 ```
 
-Do not add a model-escalation ladder by default. If fallback escalation is explicitly requested, put it in a separate `fallback` field so it is clearly optional.
+For model-executed tasks, normally set enough retry budget for upward reclassification: LOW can progress to MEDIUM/HIGH, MEDIUM can progress to HIGH, and HIGH can retry at HIGH. Keep deterministic NONE steps separate from model-based debugging tasks.
 
 ## Quality checks before finalizing
 
@@ -89,3 +103,4 @@ Do not add a model-escalation ladder by default. If fallback escalation is expli
 - Deterministic test/build steps use NONE when no model reasoning is needed.
 - No task depends on hidden conversation context if it is marked as a handoff boundary.
 - Acceptance criteria describe observable outcomes, not “AI says complete”.
+- Failure promotion reflects corrected difficulty classification, not a deliberate weak-first policy.
