@@ -1,7 +1,7 @@
 {
   "name": "dev-task-router",
-  "version": "0.6.0",
-  "description": "Decompose software projects, inspect targeted GitHub repository evidence, classify engineering difficulty, then map each task onto the models available in Chat, Codex, Work, or another execution surface.",
+  "version": "0.7.0",
+  "description": "Decompose software projects, inspect targeted GitHub evidence, classify difficulty, route tasks, and support verified local same-conversation model/reasoning switching.",
   "author": {
     "name": "beiming183-cloud"
   },
@@ -12,17 +12,17 @@
     "task-decomposition",
     "difficulty-classification",
     "model-routing",
+    "local-mode-switching",
     "github-context",
     "workflow",
-    "planning",
     "handoff",
     "developer-tools"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "项目拆解器",
-    "shortDescription": "结合仓库事实判断难度并路由模型",
-    "longDescription": "把软件开发目标拆成 Project / Stage / Step / Task；在真实 GitHub 仓库可用时，先读取与任务相关的 branch、commit、文件、测试、PR/diff 和 CI 证据，再判断 NONE、LOW、MEDIUM 或 HIGH，最后根据 Chat、Codex、Work 等执行环境映射模型与推理档位。只携带相关仓库上下文，不无差别读取整个仓库；真实任务失败后上调难度。",
+    "shortDescription": "按任务难度路由并在本地精确切换模式",
+    "longDescription": "把复杂软件项目拆成可验证 Task，结合 GitHub 仓库事实判断 NONE、LOW、MEDIUM 或 HIGH，再映射到 Chat、Codex、Work 的模型与推理档位。V0.7 优先实现本地同一会话 exact switching：通过轻量 Windows companion 使用 UI Automation/accessibility 标签切换当前 ChatGPT 会话，切换后必须验证实际 profile；不依赖屏幕坐标，也不会把模式切换失败误判成任务难度不足。",
     "developerName": "beiming183-cloud",
     "category": "Developer Tools",
     "capabilities": [
@@ -30,9 +30,9 @@
     ],
     "websiteURL": "https://github.com/beiming183-cloud/dev-task-router",
     "defaultPrompt": [
-      "结合当前 GitHub 仓库，把这个开发目标拆成任务并按真实难度分配模型。",
-      "读取与这个需求相关的代码、测试和 CI，再判断它应该是 LOW、MEDIUM 还是 HIGH。",
-      "基于当前 PR/diff 和 CI 生成下一模型需要的最小 handoff。"
+      "把这个复杂项目拆成任务，简单任务用低推理，复杂任务用高推理，并保持同一个项目会话。",
+      "结合当前 GitHub 仓库判断下一任务难度，并给出本地 exact mode switch 目标。",
+      "检查当前任务的 requested profile 和 actual profile 是否一致，只有验证成功后再继续。"
     ]
   }
 }
