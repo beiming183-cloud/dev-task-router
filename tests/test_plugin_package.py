@@ -16,13 +16,13 @@ def test_plugin_manifest_and_marketplace_are_valid() -> None:
     marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
 
     assert manifest["name"] == "dev-task-router"
-    assert manifest["version"] == "0.7.0"
+    assert manifest["version"] == "0.8.0"
     assert manifest["skills"] == "./skills/"
     assert "mcpServers" not in manifest
     assert "apps" not in manifest
     assert manifest["interface"]["displayName"] == "项目拆解器"
-    assert "GitHub" in manifest["description"]
     assert "local" in manifest["description"].lower()
+    assert "gate" in manifest["description"].lower()
 
     plugins = marketplace["plugins"]
     assert len(plugins) == 1
@@ -39,6 +39,7 @@ def test_required_skills_have_frontmatter_and_correct_routing_policy() -> None:
         "route-model",
         "build-context-pack",
         "switch-local-mode",
+        "prepare-local-execution",
         "create-handoff",
     }
 
@@ -103,6 +104,15 @@ def test_required_skills_have_frontmatter_and_correct_routing_policy() -> None:
     assert "verified: true" in switch_text
     assert "no fixed screen coordinates" in switch_text.lower()
     assert "MODE_SWITCH" in switch_text
+
+    execution_text = (PLUGIN / "skills" / "prepare-local-execution" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "STALE_CONTEXT" in execution_text
+    assert "PROFILE_MISMATCH" in execution_text
+    assert "must not increment the Task attempt counter" in execution_text
+    assert "must not claim the coding Task has run" in execution_text
+    assert "autodev-local gate --switch" in execution_text
 
     handoff_text = (PLUGIN / "skills" / "create-handoff" / "SKILL.md").read_text(
         encoding="utf-8"
