@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .config import HANDOFF_FILE, autodev_dir
+from .config import HANDOFF_FILE, autodev_dir, load_repository_context
 from .models import Plan, TaskStatus
 
 
 class HandoffWriter:
     def __init__(self, root: Path):
+        self.root = root
         self.path = autodev_dir(root) / HANDOFF_FILE
 
     def write(self, plan: Plan, state: dict) -> Path:
@@ -29,12 +30,48 @@ class HandoffWriter:
             f"- Current task: `{state.get('current_task') or 'none'}`",
             f"- Completed: {len(passed)}/{len(plan.tasks)}",
             f"- Next unresolved: `{pending[0] if pending else 'none'}`",
-            "",
-            "## Tasks",
-            "",
-            "| Stage | Step | Role | Task | Status | Attempts | Route | Last failure |",
-            "| --- | --- | --- | --- | --- | ---: | --- | --- |",
         ]
+
+        repo = load_repository_context(self.root)
+        if repo is not None:
+            compact = repo.compact(max_files=12, max_facts=6)
+            lines.extend(
+                [
+                    "",
+                    "## Repository evidence",
+                    "",
+                    f"- Source: `{compact['source']}`",
+                    f"- Repository: `{compact['repository']}`",
+                    f"- Branch: `{compact['branch'] or 'unknown'}`",
+                    f"- Commit: `{compact['commit'] or 'unanchored'}`",
+                    f"- PR: `{compact['pr_number'] or 'none'}`",
+                    f"- CI: `{compact['ci_status']}`",
+                ]
+            )
+            if compact["ci_checks"]:
+                lines.append(f"- CI checks: {', '.join(compact['ci_checks'])}")
+            if compact["files"]:
+                lines.append("- Relevant files:")
+                lines.extend(f"  - `{path}`" for path in compact["files"])
+                if compact["file_count_total"] > len(compact["files"]):
+                    lines.append(
+                        f"  - ... {compact['file_count_total'] - len(compact['files'])} more omitted"
+                    )
+            if compact["evidence_tags"]:
+                lines.append(f"- Evidence tags: {', '.join(compact['evidence_tags'])}")
+            if compact["facts"]:
+                lines.append("- Verified facts:")
+                lines.extend(f"  - {fact}" for fact in compact["facts"])
+
+        lines.extend(
+            [
+                "",
+                "## Tasks",
+                "",
+                "| Stage | Step | Role | Task | Status | Attempts | Route | Last failure |",
+                "| --- | --- | --- | --- | --- | ---: | --- | --- |",
+            ]
+        )
         for task in plan.tasks:
             item = state["tasks"][task.id]
             route = item.get("route") or {}
@@ -59,6 +96,7 @@ class HandoffWriter:
                 "## Resume rule",
                 "",
                 "Read this file plus the relevant task files; do not replay old chat history.",
+                "Treat the repository commit above as the evidence anchor. If the branch moved, refresh GitHub evidence before making scope-sensitive decisions.",
                 "If the workflow is FAILED/BLOCKED, inspect the last failure before using `autodev retry <task>`.",
                 "",
             ]
