@@ -117,7 +117,7 @@ Skill-only Plugin 可以规划和推荐模型档位，但不会假装已经替 C
 - **V0.1 ✅**：状态机 + YAML 计划 + CLI 最小闭环
 - **V0.2 ✅**：任务层级 + 多模型路由 + Executor + Handoff
 - **V0.3 ✅**：Checker + Reviewer + Retry + Escalation + BLOCKED
-- **V0.4 🚧**：ChatGPT / Codex Plugin + Skill 化
+- **V0.4 ✅**：ChatGPT / Codex Plugin + Skill 化
 - **V0.5**：更强的自动任务拆解与复杂度判断
 - **V0.6**：GitHub Plugin/App 联动与仓库上下文
 - **V0.7**：Context / Handoff 优化
@@ -137,7 +137,9 @@ Skill-only Plugin 可以规划和推荐模型档位，但不会假装已经替 C
 
 ## 当前状态
 
-**V0.4 GPT Plugin 改造进行中：Skill-only plugin skeleton 已建立。**
+**V0.4 complete on `main`.**
+
+Plugin package 与完整 Python 回归：**23 passed**。
 
 ---
 
