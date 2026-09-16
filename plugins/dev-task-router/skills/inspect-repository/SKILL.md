@@ -91,7 +91,7 @@ relevant_files:
   - path/to/implementation
 changed_files:
   - path/from/relevant/diff
- test_files:
+test_files:
   - path/to/test
 ci_status: unknown | pending | success | failure | cancelled
 ci_checks:
