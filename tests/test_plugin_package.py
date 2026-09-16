@@ -16,13 +16,13 @@ def test_plugin_manifest_and_marketplace_are_valid() -> None:
     marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
 
     assert manifest["name"] == "dev-task-router"
-    assert manifest["version"] == "0.8.0"
+    assert manifest["version"] == "0.9.0"
     assert manifest["skills"] == "./skills/"
     assert "mcpServers" not in manifest
     assert "apps" not in manifest
     assert manifest["interface"]["displayName"] == "项目拆解器"
-    assert "local" in manifest["description"].lower()
-    assert "gate" in manifest["description"].lower()
+    assert "recovery" in manifest["description"].lower() or "recover" in manifest["description"].lower()
+    assert "evidence" in manifest["description"].lower()
 
     plugins = marketplace["plugins"]
     assert len(plugins) == 1
@@ -40,6 +40,7 @@ def test_required_skills_have_frontmatter_and_correct_routing_policy() -> None:
         "build-context-pack",
         "switch-local-mode",
         "prepare-local-execution",
+        "recover-execution",
         "create-handoff",
     }
 
@@ -113,6 +114,17 @@ def test_required_skills_have_frontmatter_and_correct_routing_policy() -> None:
     assert "must not increment the Task attempt counter" in execution_text
     assert "must not claim the coding Task has run" in execution_text
     assert "autodev-local gate --switch" in execution_text
+
+    recovery_text = (PLUGIN / "skills" / "recover-execution" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "SAFE_RETRY" in recovery_text
+    assert "AMBIGUOUS" in recovery_text
+    assert "execution-evidence.jsonl" in recovery_text
+    assert "autodev-local audit --json" in recovery_text
+    assert "autodev-local sync-repository --json" in recovery_text
+    assert "same canonical ChatGPT conversation must not be described as an independent reviewer" in recovery_text
+    assert "implemented but not live-verified" in recovery_text
 
     handoff_text = (PLUGIN / "skills" / "create-handoff" / "SKILL.md").read_text(
         encoding="utf-8"

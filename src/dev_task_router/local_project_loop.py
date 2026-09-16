@@ -7,6 +7,7 @@ from typing import Any
 from .config import load_rolling_context, save_rolling_context
 from .deterministic_runner import DeterministicTaskRunner
 from .handoff import HandoffWriter
+from .local_review import IndependentLocalReviewer
 from .local_session import LocalCycleResult, LocalTaskCycle
 from .models import Plan
 from .state import StateStore, now_iso
@@ -32,17 +33,15 @@ class LocalProjectLoopResult:
 
 
 class LocalProjectLoop:
-    """Bounded project-level loop over model and deterministic Task execution.
+    """Bounded project-level loop over model, deterministic and review execution.
 
     Only verified PASS facts are written into rolling context. The assistant response
-    is never mined for durable decisions or constraints. CHECK_FAILED may continue to
-    another model attempt because it is genuine execution evidence; infrastructure
-    and ambiguous states always stop the loop. Successful NONE tasks can run locally
-    and continue, while deterministic failure stops at DEBUG_TASK_REQUIRED instead of
-    being promoted as a model-difficulty failure.
+    is never mined for durable decisions or constraints. CHECK_FAILED and a clean
+    independent REVIEW_FAILED may continue to another implementation attempt because
+    they are genuine execution evidence; infrastructure and ambiguous states stop.
     """
 
-    CONTINUE_STATUSES = {"PASSED", "CHECK_FAILED"}
+    CONTINUE_STATUSES = {"PASSED", "CHECK_FAILED", "REVIEW_FAILED"}
 
     def __init__(
         self,
@@ -52,12 +51,23 @@ class LocalProjectLoop:
         cycle: LocalTaskCycle,
         *,
         deterministic_runner: DeterministicTaskRunner | None = None,
+        reviewer_runner: IndependentLocalReviewer | None = None,
     ):
         self.root = root
         self.plan = plan
         self.store = store
         self.cycle = cycle
         self.deterministic_runner = deterministic_runner
+        if reviewer_runner is None and hasattr(cycle, "orchestrator") and hasattr(cycle, "sessions"):
+            reviewer_runner = IndependentLocalReviewer(
+                root,
+                plan,
+                store,
+                cycle.orchestrator.router,
+                cycle.sessions,
+                evidence=getattr(cycle, "evidence", None),
+            )
+        self.reviewer_runner = reviewer_runner
         self.handoff = HandoffWriter(root)
 
     def _task_title(self, task_id: str) -> str:
@@ -114,6 +124,15 @@ class LocalProjectLoop:
                     deterministic.message,
                     check=deterministic.check,
                 )
+
+        if (
+            result.status == "REVIEW_REQUIRED"
+            and self.reviewer_runner is not None
+            and result.task_id
+            and result.dispatch_id
+        ):
+            result = self.reviewer_runner.run(result.task_id, result.dispatch_id)
+
         self._record_verified_pass(result)
         return result
 

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .checker import CheckReport, TaskChecker, git_snapshot
+from .checker import CheckReport, TaskChecker, git_snapshot, snapshot_digest
+from .execution_evidence import ExecutionEvidenceLedger
 from .executor import CommandExecutor, ExecutionRequest
 from .handoff import HandoffWriter
 from .models import ModelLevel, Plan, TaskSpec, TaskStatus, WorkflowStatus
@@ -38,6 +41,7 @@ class DeterministicTaskRunner:
         *,
         command_executor: CommandExecutor | None = None,
         checker: TaskChecker | None = None,
+        evidence: ExecutionEvidenceLedger | None = None,
     ):
         self.root = root
         self.plan = plan
@@ -47,6 +51,7 @@ class DeterministicTaskRunner:
         self.checker = checker or TaskChecker(self.command_executor)
         self.handoff = HandoffWriter(root)
         self.usage = UsageLogger(root)
+        self.evidence = evidence or ExecutionEvidenceLedger(root)
 
     @staticmethod
     def _route_dict(route) -> dict[str, object]:
@@ -59,6 +64,27 @@ class DeterministicTaskRunner:
             "confidence": route.confidence,
             "traits": list(route.traits),
         }
+
+    @staticmethod
+    def _command_digest(command: list[str]) -> str:
+        payload = json.dumps(command, ensure_ascii=False, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _record_state(self, task: TaskSpec, *, status: str) -> None:
+        state = self.store.load()
+        item = state["tasks"][task.id]
+        self.evidence.record(
+            task_id=task.id,
+            kind="STATE_RECORDED",
+            data={
+                "execution": "deterministic",
+                "task_status": item.get("status"),
+                "attempts": item.get("attempts"),
+                "last_failure_type": item.get("last_failure_type"),
+                "workflow_status": state.get("status"),
+                "result_status": status,
+            },
+        )
 
     def run(self, task: TaskSpec) -> DeterministicRunResult:
         state = self.store.ensure_for_plan(self.plan)
@@ -80,6 +106,7 @@ class DeterministicTaskRunner:
             raise ValueError(f"deterministic task {task.id} has no command")
 
         before_git = git_snapshot(self.root) if task.require_diff else None
+        before_git_digest = snapshot_digest(before_git) if before_git is not None else None
         task_state["attempts"] = int(task_state.get("attempts", 0)) + 1
         task_state["started_at"] = now_iso()
         task_state["finished_at"] = None
@@ -92,6 +119,19 @@ class DeterministicTaskRunner:
         state["current_task"] = task.id
         self.store.save(state)
 
+        self.evidence.record(
+            task_id=task.id,
+            kind="DETERMINISTIC_STARTED",
+            data={
+                "attempt": task_state["attempts"],
+                "level": ModelLevel.NONE.value,
+                "command_digest": self._command_digest(task.command),
+                "argv_count": len(task.command),
+                "require_diff": task.require_diff,
+                "before_git_digest": before_git_digest,
+            },
+        )
+
         request = ExecutionRequest(
             task_id=task.id,
             command=task.command,
@@ -101,9 +141,26 @@ class DeterministicTaskRunner:
             route=route,
         )
         result = self.command_executor.run(request)
+        self.evidence.record(
+            task_id=task.id,
+            kind="DETERMINISTIC_COMMAND_COMPLETED",
+            data={
+                "attempt": task_state["attempts"],
+                "returncode": result.returncode,
+                "ok": result.returncode == 0,
+            },
+        )
         if result.returncode != 0:
             message = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
-            return self._fail(task, route, message, "DETERMINISTIC_COMMAND", result.returncode)
+            outcome = self._fail(
+                task,
+                route,
+                message,
+                "DETERMINISTIC_COMMAND",
+                result.returncode,
+            )
+            self._record_state(task, status=outcome.status)
+            return outcome
 
         check = self.checker.run(
             task,
@@ -111,8 +168,19 @@ class DeterministicTaskRunner:
             route=route,
             before_git=before_git,
         )
+        self.evidence.record(
+            task_id=task.id,
+            kind="DETERMINISTIC_CHECKED",
+            data={
+                "attempt": task_state["attempts"],
+                "ok": check.ok,
+                "failure_type": check.failure_type,
+                "returncode": check.returncode,
+                "message": check.message,
+            },
+        )
         if not check.ok:
-            return self._fail(
+            outcome = self._fail(
                 task,
                 route,
                 check.message,
@@ -120,6 +188,8 @@ class DeterministicTaskRunner:
                 check.returncode,
                 check=check,
             )
+            self._record_state(task, status=outcome.status)
+            return outcome
 
         state = self.store.load()
         item = state["tasks"][task.id]
@@ -141,7 +211,14 @@ class DeterministicTaskRunner:
             status="PASSED",
             returncode=0,
         )
-        return DeterministicRunResult(task.id, "PASSED", "deterministic command and checks passed", check)
+        outcome = DeterministicRunResult(
+            task.id,
+            "PASSED",
+            "deterministic command and checks passed",
+            check,
+        )
+        self._record_state(task, status=outcome.status)
+        return outcome
 
     def _fail(
         self,

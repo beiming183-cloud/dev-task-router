@@ -15,10 +15,15 @@ from .conversation_ui import (
     load_local_conversation_config,
 )
 from .deterministic_runner import DeterministicTaskRunner
+from .evidence_cycle import EvidenceTrackingCycle
+from .execution_audit import LocalExecutionAuditor
+from .execution_evidence import ExecutionEvidenceLedger
 from .local_loop import DryRunConversationBackend, LocalConversationOrchestrator
 from .local_project_loop import LocalProjectLoop
 from .local_session import LocalTaskCycle
 from .mode_switch import DryRunModeSwitchBackend, WindowsUIAModeSwitchBackend
+from .recovery import LocalRecoveryController
+from .repository_reconcile import RepositoryEvidenceReconciler
 from .response_monitor import ConversationResponseMonitor
 from .state import StateStore
 
@@ -63,7 +68,7 @@ def _orchestrator(
     )
 
 
-def _cycle(root: Path) -> LocalTaskCycle:
+def _cycle(root: Path) -> EvidenceTrackingCycle:
     plan = load_plan(root)
     store = StateStore(root)
     orchestrator = _orchestrator(root, switch=True, conversation=True)
@@ -75,7 +80,8 @@ def _cycle(root: Path) -> LocalTaskCycle:
         timeout_seconds=response_config.timeout_seconds,
         stable_polls=response_config.stable_polls,
     )
-    return LocalTaskCycle(root, plan, store, orchestrator, monitor)
+    base = LocalTaskCycle(root, plan, store, orchestrator, monitor)
+    return EvidenceTrackingCycle(root, base)
 
 
 def _project_loop(root: Path) -> LocalProjectLoop:
@@ -85,6 +91,7 @@ def _project_loop(root: Path) -> LocalProjectLoop:
         cycle.plan,
         cycle.store,
         cycle.orchestrator.router,
+        evidence=cycle.evidence,
     )
     return LocalProjectLoop(
         root,
@@ -257,6 +264,103 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return 0 if result.status in {"PASSED", "REVIEW_REQUIRED"} else 1
 
 
+def cmd_recover(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    cycle = _cycle(root)
+    controller = LocalRecoveryController(root, cycle.cycle, evidence=cycle.evidence)
+    result = controller.reconcile_next()
+    if result.dispatch_id:
+        cycle.sync_dispatch(result.dispatch_id)
+    payload = result.to_dict()
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"task: {result.task_id or 'none'}")
+        print(f"dispatch: {result.dispatch_id or 'none'}")
+        print(f"status: {result.status}")
+        print(f"safe to retry: {'yes' if result.safe_to_retry else 'no'}")
+        print(f"resumable: {'yes' if result.resumable else 'no'}")
+        print(result.message)
+    return 0 if result.status in {
+        "NO_TASK",
+        "SAFE_RETRY",
+        "RESUME",
+        "ALREADY_RESUMABLE",
+        "RECOVERED_STATE",
+    } else 1
+
+
+def cmd_evidence(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    ledger = ExecutionEvidenceLedger(root)
+    events = (
+        ledger.events_for_dispatch(args.dispatch_id)
+        if args.dispatch_id
+        else ledger.events()
+    )
+    payload = {
+        "chain_valid": ledger.verify_chain(),
+        "event_count": len(events),
+        "events": [event.to_dict() for event in events],
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"chain valid: {'yes' if payload['chain_valid'] else 'no'}")
+        print(f"events: {payload['event_count']}")
+        for event in events:
+            print(
+                f"{event.sequence}. {event.kind} task={event.task_id} "
+                f"dispatch={event.dispatch_id or '-'}"
+            )
+    return 0 if payload["chain_valid"] else 1
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    report = LocalExecutionAuditor(root).run()
+    payload = report.to_dict()
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"audit: {'PASS' if report.ok else 'FAIL'}")
+        print(f"errors: {len(report.errors)}")
+        print(f"warnings: {len(report.warnings)}")
+        print(f"evidence events: {report.evidence_events}")
+        print(f"sessions: {report.session_count}")
+        print(f"dispatches: {report.dispatch_count}")
+        for issue in report.issues:
+            where = []
+            if issue.task_id:
+                where.append(f"task={issue.task_id}")
+            if issue.dispatch_id:
+                where.append(f"dispatch={issue.dispatch_id}")
+            suffix = f" ({', '.join(where)})" if where else ""
+            print(f"{issue.severity} {issue.code}: {issue.message}{suffix}")
+    return 0 if report.ok else 1
+
+
+def cmd_sync_repository(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    result = RepositoryEvidenceReconciler(root).reconcile(require_ci_success=True)
+    payload = result.to_dict()
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"repository sync: {'ACCEPTED' if result.accepted else 'BLOCKED'}")
+        print(f"status: {result.status}")
+        print(f"repository: {result.repository or 'unknown'}")
+        print(f"commit: {result.commit or 'unanchored'}")
+        print(f"ci: {result.ci_status or 'unknown'}")
+        print(f"local HEAD: {result.local_head or 'unknown'}")
+        if result.dirty_paths:
+            print("dirty business paths:")
+            for path in result.dirty_paths:
+                print(f"- {path}")
+        print(result.message)
+    return 0 if result.accepted else 1
+
+
 def cmd_continue(args: argparse.Namespace) -> int:
     root = project_root(args.root)
     result = _project_loop(root).run_until_blocked(max_cycles=args.max_cycles)
@@ -270,7 +374,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="autodev-local",
         description=(
-            "Prepare, gate, dispatch, collect and verify Tasks in the canonical local ChatGPT conversation"
+            "Prepare, gate, dispatch, collect, recover, audit, and verify Tasks in the canonical local ChatGPT conversation"
         ),
     )
     parser.add_argument("--root", help="project root; defaults to current directory")
@@ -321,6 +425,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     resume.add_argument("--json", action="store_true", help="print the cycle result as JSON")
     resume.set_defaults(func=cmd_resume)
+
+    recover = sub.add_parser(
+        "recover",
+        help="reconcile crash/ambiguous local execution boundaries without automatic duplicate sends",
+    )
+    recover.add_argument("--json", action="store_true", help="print the recovery result as JSON")
+    recover.set_defaults(func=cmd_recover)
+
+    evidence = sub.add_parser(
+        "evidence",
+        help="inspect and verify the compact append-only local execution evidence chain",
+    )
+    evidence.add_argument("--dispatch-id", help="show events for one dispatch only")
+    evidence.add_argument("--json", action="store_true", help="print evidence as JSON")
+    evidence.set_defaults(func=cmd_evidence)
+
+    audit = sub.add_parser(
+        "audit",
+        help="cross-check evidence, sessions, dispatch ledger, response digests, and workflow state without mutating them",
+    )
+    audit.add_argument("--json", action="store_true", help="print the audit report as JSON")
+    audit.set_defaults(func=cmd_audit)
+
+    sync_repo = sub.add_parser(
+        "sync-repository",
+        help="advance rolling commit anchor only when GitHub context/CI and clean local HEAD agree",
+    )
+    sync_repo.add_argument("--json", action="store_true", help="print repository reconciliation as JSON")
+    sync_repo.set_defaults(func=cmd_sync_repository)
 
     continuous = sub.add_parser(
         "continue",

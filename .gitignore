@@ -10,3 +10,4 @@ build/
 .autodev/local-dispatch.json
 .autodev/local-sessions.json
 .autodev/local-responses/
+.autodev/execution-evidence.jsonl
