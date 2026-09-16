@@ -22,10 +22,40 @@ def test_ui_fingerprint_does_not_persist_dynamic_ui_text(tmp_path) -> None:
     raw = store.path.read_text(encoding="utf-8")
     assert secret not in raw
     assert fingerprint.tracked_hits == {"conversation.send": 1}
+    assert fingerprint.stable_control_count == 1
     assert store.compare(fingerprint).status == "MATCH"
 
 
-def test_ui_fingerprint_detects_stable_structure_and_selector_drift(tmp_path) -> None:
+def test_untracked_dynamic_message_controls_do_not_create_false_drift(tmp_path) -> None:
+    labels = {"conversation.send": ("Send",)}
+    baseline = UIFingerprint.from_rows(
+        {
+            "conversation": [
+                {"name": "Chat A", "control_type": "Text", "automation_id": "message-100"},
+                {"name": "Send", "control_type": "Button", "automation_id": "send-button"},
+            ]
+        },
+        tracked_labels=labels,
+        platform="win32",
+    )
+    current = UIFingerprint.from_rows(
+        {
+            "conversation": [
+                {"name": "Chat B", "control_type": "Text", "automation_id": "message-999"},
+                {"name": "Send", "control_type": "Button", "automation_id": "send-button"},
+            ]
+        },
+        tracked_labels=labels,
+        platform="win32",
+    )
+    store = UIFingerprintStore(tmp_path)
+    store.save(baseline)
+
+    assert baseline.digest == current.digest
+    assert store.compare(current).status == "MATCH"
+
+
+def test_ui_fingerprint_detects_calibrated_selector_structure_drift(tmp_path) -> None:
     baseline = UIFingerprint.from_rows(
         {
             "mode": [
