@@ -19,7 +19,17 @@ NONE / LOW / MEDIUM / HIGH
 matching model profile
 ```
 
-Do **not** use a weak-first escalation strategy as the normal path. If a task is already judged HIGH, route it directly to HIGH. If a task is MEDIUM, route it directly to MEDIUM. Retries stay on the same tier unless the user or project policy explicitly enables fallback escalation.
+Do not deliberately start every task on a weak model. Classify first, then route directly to the matching tier.
+
+If the assigned model fails the task, treat that failure as evidence that the original difficulty classification may have been too low. The next attempt should normally be reclassified upward by one tier:
+
+```text
+LOW failure    → MEDIUM
+MEDIUM failure → HIGH
+HIGH failure   → HIGH retry or BLOCKED
+```
+
+This is not a weak-first strategy. The first attempt must still use the best tier predicted from the task itself.
 
 ## Difficulty rubric
 
@@ -32,6 +42,8 @@ Use when no reasoning model is needed and the step is deterministic, for example
 - run a build command;
 - collect an existing artifact;
 - inspect an already-produced exit code.
+
+If a deterministic NONE step fails, do not pretend that rerunning the same command with a model fixes it. Create or route a separate debugging/analysis task whose difficulty is classified from the failure evidence.
 
 ### LOW
 
@@ -90,25 +102,28 @@ Prefer abstract profiles in plans:
 
 If the user provides concrete models, map those profiles to the user's models. If not, keep the abstract profile names instead of inventing model availability.
 
-When working inside ChatGPT, do not claim that this skill changed the active model unless the product explicitly performed that switch. A skill-only plugin can recommend the profile and prepare a handoff; automatic model switching requires product support or a separate execution integration.
+When working inside ChatGPT, do not claim that this skill changed the active model unless the product explicitly performed that switch. A skill-only plugin can recommend the profile and prepare the next task/handoff; automatic model switching requires product support or a separate execution integration.
 
-## Retry policy
+## Failure reclassification policy
 
-Default:
+Default behavior for model-executed tasks:
 
 ```text
-LOW failure    → LOW retry
-MEDIUM failure → MEDIUM retry
-HIGH failure   → HIGH retry
+initial classification → matching model tier
+failure                → promote one tier
+success                → keep the recorded classification
 ```
 
-Escalation is optional, not default. Only propose or use escalation when one of these is true:
+More specifically:
 
-- the user explicitly requested fallback escalation;
-- project policy explicitly enables it;
-- new evidence shows the original difficulty classification was wrong.
+- `LOW` failure: reclassify the next attempt as `MEDIUM`.
+- `MEDIUM` failure: reclassify the next attempt as `HIGH`.
+- `HIGH` failure: remain `HIGH`; retry only when another attempt is useful, otherwise mark `BLOCKED`.
+- `NONE` command failure: create a new debugging task and classify that debugging task separately.
 
-When escalation happens because the original classification was wrong, update the classification reason rather than pretending the task was intentionally weak-first.
+Record why the reclassification happened, for example: `previous LOW attempt failed verification; complexity underestimated`.
+
+A failure caused by infrastructure, permissions, missing credentials, rate limits, or unavailable tools is not evidence of task difficulty. In those cases, keep the difficulty unchanged and report the real blocker.
 
 ## Decomposition rules
 
