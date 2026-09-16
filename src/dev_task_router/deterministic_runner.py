@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -112,12 +113,13 @@ class DeterministicTaskRunner:
         before_git = git_snapshot(self.root) if task.require_diff else None
         before_git_digest = snapshot_digest(before_git) if before_git is not None else None
         task_state["attempts"] = int(task_state.get("attempts", 0)) + 1
+        attempt = int(task_state["attempts"])
         task_state["started_at"] = now_iso()
         task_state["finished_at"] = None
         task_state["status"] = TaskStatus.RUNNING.value
         task_state["route"] = self._route_dict(route)
         task_state.setdefault("route_history", []).append(
-            {"attempt": task_state["attempts"], **self._route_dict(route)}
+            {"attempt": attempt, **self._route_dict(route)}
         )
         state["status"] = WorkflowStatus.RUNNING.value
         state["current_task"] = task.id
@@ -127,7 +129,7 @@ class DeterministicTaskRunner:
             task_id=task.id,
             kind="DETERMINISTIC_STARTED",
             data={
-                "attempt": task_state["attempts"],
+                "attempt": attempt,
                 "level": ModelLevel.NONE.value,
                 "command_digest": self._command_digest(task.command),
                 "argv_count": len(task.command),
@@ -136,6 +138,8 @@ class DeterministicTaskRunner:
             },
         )
 
+        total_started = time.monotonic()
+        command_started = time.monotonic()
         request = ExecutionRequest(
             task_id=task.id,
             command=task.command,
@@ -145,13 +149,15 @@ class DeterministicTaskRunner:
             route=route,
         )
         result = self.command_executor.run(request)
+        command_duration = time.monotonic() - command_started
         self.evidence.record(
             task_id=task.id,
             kind="DETERMINISTIC_COMMAND_COMPLETED",
             data={
-                "attempt": task_state["attempts"],
+                "attempt": attempt,
                 "returncode": result.returncode,
                 "ok": result.returncode == 0,
+                "duration_seconds": round(command_duration, 6),
             },
         )
         if result.returncode != 0:
@@ -162,6 +168,7 @@ class DeterministicTaskRunner:
                 message,
                 "DETERMINISTIC_COMMAND",
                 result.returncode,
+                duration_seconds=time.monotonic() - total_started,
             )
             self._record_state(task, status=outcome.status)
             return outcome
@@ -172,15 +179,17 @@ class DeterministicTaskRunner:
             route=route,
             before_git=before_git,
         )
+        total_duration = time.monotonic() - total_started
         self.evidence.record(
             task_id=task.id,
             kind="DETERMINISTIC_CHECKED",
             data={
-                "attempt": task_state["attempts"],
+                "attempt": attempt,
                 "ok": check.ok,
                 "failure_type": check.failure_type,
                 "returncode": check.returncode,
                 "message": check.message,
+                "duration_seconds": round(total_duration, 6),
             },
         )
         if not check.ok:
@@ -191,6 +200,7 @@ class DeterministicTaskRunner:
                 "DETERMINISTIC_CHECK",
                 check.returncode,
                 check=check,
+                duration_seconds=total_duration,
             )
             self._record_state(task, status=outcome.status)
             return outcome
@@ -201,6 +211,7 @@ class DeterministicTaskRunner:
         item["finished_at"] = now_iso()
         item["last_error"] = None
         item["last_failure_type"] = None
+        item["debug_task_recheck_pending"] = False
         state["current_task"] = None
         all_passed = all(
             state["tasks"][candidate.id]["status"] == TaskStatus.PASSED.value
@@ -214,6 +225,10 @@ class DeterministicTaskRunner:
             route=self._route_dict(route),
             status="PASSED",
             returncode=0,
+            attempt=attempt,
+            duration_seconds=total_duration,
+            source="deterministic",
+            usage_id=f"deterministic:{task.id}:attempt:{attempt}",
         )
         outcome = DeterministicRunResult(
             task.id,
@@ -233,6 +248,7 @@ class DeterministicTaskRunner:
         returncode: int | None,
         *,
         check: CheckReport | None = None,
+        duration_seconds: float | None = None,
     ) -> DeterministicRunResult:
         state = self.store.load()
         item = state["tasks"][task.id]
@@ -275,11 +291,17 @@ class DeterministicTaskRunner:
             state = self.store.load()
 
         self.handoff.write(self.plan, state)
+        attempt = int(item.get("attempts", 0))
         self.usage.append(
             task_id=task.id,
             route=self._route_dict(route),
             status=f"FAILED_{failure_type}",
             returncode=returncode,
+            attempt=attempt,
+            failure_type=failure_type,
+            duration_seconds=duration_seconds,
+            source="deterministic",
+            usage_id=f"deterministic:{task.id}:attempt:{attempt}",
         )
         return DeterministicRunResult(
             task.id,
