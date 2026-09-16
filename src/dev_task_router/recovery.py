@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,15 @@ class LocalRecoveryController:
     current-conversation activity. Ambiguity is never resolved by guessing.
     """
 
+    ACTIVE_STATUSES = {
+        "PREPARED",
+        "SUBMITTED",
+        "WAITING_RESPONSE",
+        "COLLECTED",
+        "CHECKED",
+        "REVIEW_REQUIRED",
+    }
+
     def __init__(
         self,
         root: Path,
@@ -63,6 +73,64 @@ class LocalRecoveryController:
         return bool(
             current.message_count > baseline.message_count
             or current.latest_digest != baseline.latest_digest
+        )
+
+    def _latest_active_any(self) -> tuple[str, dict[str, Any]] | None:
+        if not self.sessions.path.exists():
+            return None
+        data = json.loads(self.sessions.path.read_text(encoding="utf-8"))
+        sessions = data.get("sessions", {}) if isinstance(data, dict) else {}
+        if not isinstance(sessions, dict):
+            raise ValueError("local-sessions.json must contain a sessions mapping")
+        candidates = [
+            (dispatch_id, item)
+            for dispatch_id, item in sessions.items()
+            if isinstance(item, dict) and item.get("status") in self.ACTIVE_STATUSES
+        ]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda pair: str(pair[1].get("updated_at", "")), reverse=True)
+        return candidates[0]
+
+    def _recover_terminal_state_session(self) -> RecoveryResult | None:
+        active = self._latest_active_any()
+        if active is None:
+            return None
+        dispatch_id, session = active
+        task_id = str(session.get("task_id", "")).strip()
+        if not task_id:
+            return None
+        state = self.cycle.store.ensure_for_plan(self.cycle.plan)
+        item = state.get("tasks", {}).get(task_id)
+        if not isinstance(item, dict):
+            return None
+        if item.get("local_dispatch_id") != dispatch_id:
+            return None
+        if item.get("status") != "PASSED":
+            return None
+
+        self.sessions.update(
+            dispatch_id,
+            status="PASSED",
+            recovery_reason="workflow PASS was durable before session terminal update",
+        )
+        self.evidence.record(
+            task_id=task_id,
+            dispatch_id=dispatch_id,
+            kind="RECOVERY_STATE_TERMINAL",
+            data={
+                "task_status": "PASSED",
+                "attempts": item.get("attempts"),
+                "previous_session_status": session.get("status"),
+            },
+        )
+        return RecoveryResult(
+            task_id,
+            dispatch_id,
+            "RECOVERED_STATE",
+            False,
+            False,
+            "workflow PASS already existed; session terminal state was repaired without another attempt",
         )
 
     def _recover_written_response(
@@ -129,6 +197,9 @@ class LocalRecoveryController:
     def reconcile_next(self) -> RecoveryResult:
         task = self.cycle.orchestrator.next_task()
         if task is None:
+            repaired = self._recover_terminal_state_session()
+            if repaired is not None:
+                return repaired
             return RecoveryResult("", None, "NO_TASK", False, False, "workflow has no unresolved task")
 
         active = self.sessions.active_for_task(task.id)
