@@ -5,6 +5,7 @@ from typing import Any
 
 from .classifier import DifficultyAssessment, DifficultyClassifier
 from .models import ModelLevel, TaskSpec
+from .repo_context import RepositoryContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,9 +83,15 @@ class ModelCatalog:
 
 
 class RuleRouter:
-    def __init__(self, catalog: ModelCatalog, classifier: DifficultyClassifier | None = None):
+    def __init__(
+        self,
+        catalog: ModelCatalog,
+        classifier: DifficultyClassifier | None = None,
+        repository_context: RepositoryContext | None = None,
+    ):
         self.catalog = catalog
         self.classifier = classifier or DifficultyClassifier()
+        self.repository_context = repository_context
 
     def decision_for_level(
         self,
@@ -103,7 +110,7 @@ class RuleRouter:
         )
 
     def assess(self, task: TaskSpec) -> DifficultyAssessment:
-        return self.classifier.classify(task)
+        return self.classifier.classify(task, self.repository_context)
 
     def route(
         self,
