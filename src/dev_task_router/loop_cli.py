@@ -14,6 +14,7 @@ from .conversation_ui import (
     WindowsUIAConversationBackend,
     load_local_conversation_config,
 )
+from .deterministic_runner import DeterministicTaskRunner
 from .local_loop import DryRunConversationBackend, LocalConversationOrchestrator
 from .local_project_loop import LocalProjectLoop
 from .local_session import LocalTaskCycle
@@ -79,7 +80,19 @@ def _cycle(root: Path) -> LocalTaskCycle:
 
 def _project_loop(root: Path) -> LocalProjectLoop:
     cycle = _cycle(root)
-    return LocalProjectLoop(root, cycle.plan, cycle.store, cycle)
+    deterministic = DeterministicTaskRunner(
+        root,
+        cycle.plan,
+        cycle.store,
+        cycle.orchestrator.router,
+    )
+    return LocalProjectLoop(
+        root,
+        cycle.plan,
+        cycle.store,
+        cycle,
+        deterministic_runner=deterministic,
+    )
 
 
 def _print_cycle(result, *, json_output: bool) -> None:
@@ -196,7 +209,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     root = project_root(args.root)
     result = _project_loop(root).run_one()
     _print_cycle(result, json_output=args.json)
-    if result.status in {"PASSED", "DETERMINISTIC", "REVIEW_REQUIRED", "NO_TASK"}:
+    if result.status in {"PASSED", "REVIEW_REQUIRED", "NO_TASK"}:
         return 0
     return 1
 
@@ -248,7 +261,7 @@ def cmd_continue(args: argparse.Namespace) -> int:
     root = project_root(args.root)
     result = _project_loop(root).run_until_blocked(max_cycles=args.max_cycles)
     _print_project_loop(result, json_output=args.json)
-    if result.stop_reason in {"COMPLETE", "REVIEW_REQUIRED", "DETERMINISTIC"}:
+    if result.stop_reason in {"COMPLETE", "REVIEW_REQUIRED"}:
         return 0
     return 1
 
@@ -297,27 +310,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser(
         "run",
-        help="run one full local Task cycle: gate, send/resume, collect response, then Checker",
+        help="run one full Task cycle; deterministic NONE runs locally, model Tasks use the current conversation",
     )
     run.add_argument("--json", action="store_true", help="print the cycle result as JSON")
     run.set_defaults(func=cmd_run)
 
     resume = sub.add_parser(
         "resume",
-        help="resume an existing submitted/waiting Task only; never creates a new dispatch",
+        help="resume an existing submitted/waiting model Task only; never creates a new dispatch",
     )
     resume.add_argument("--json", action="store_true", help="print the cycle result as JSON")
     resume.set_defaults(func=cmd_resume)
 
     continuous = sub.add_parser(
         "continue",
-        help="continue across verified Tasks/retries until blocked, complete, or the cycle guard is reached",
+        help="continue across verified Tasks/retries/NONE commands until blocked, complete, or the cycle guard is reached",
     )
     continuous.add_argument(
         "--max-cycles",
         type=int,
         default=10,
-        help="maximum model Task cycles in this invocation (default: 10)",
+        help="maximum Task execution cycles in this invocation (default: 10)",
     )
     continuous.add_argument("--json", action="store_true", help="print the project loop result as JSON")
     continuous.set_defaults(func=cmd_continue)
