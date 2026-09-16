@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from dev_task_router.calibration import OutcomeCalibrator
 from dev_task_router.e2e_calibration import EndToEndCalibrationRecorder
 from dev_task_router.execution_evidence import ExecutionEvidenceLedger
 from dev_task_router.local_project_loop import LocalProjectLoop
@@ -79,16 +80,92 @@ def test_usage_logger_accepts_only_reported_non_negative_tokens(tmp_path) -> Non
     )
     with pytest.raises(ValueError, match="input_tokens"):
         logger.append(
-            task_id="bad",
+            task_id="bad-negative",
             route=route,
             status="PASSED",
             returncode=0,
             input_tokens=-1,
         )
+    with pytest.raises(ValueError, match="input_tokens"):
+        logger.append(
+            task_id="bad-bool",
+            route=route,
+            status="PASSED",
+            returncode=0,
+            input_tokens=True,
+        )
+    with pytest.raises(ValueError, match="output_tokens"):
+        logger.append(
+            task_id="bad-output-bool",
+            route=route,
+            status="PASSED",
+            returncode=0,
+            output_tokens=False,
+        )
 
     rows = _usage_rows(tmp_path)
     assert rows[0]["input_tokens"] == 12
     assert rows[0]["output_tokens"] == 7
+
+
+def test_usage_logger_rejects_bool_and_negative_duration(tmp_path) -> None:
+    logger = UsageLogger(tmp_path)
+    route = {"level": "LOW"}
+    with pytest.raises(ValueError, match="duration_seconds"):
+        logger.append(
+            task_id="bool-duration",
+            route=route,
+            status="PASSED",
+            returncode=0,
+            duration_seconds=True,
+        )
+    with pytest.raises(ValueError, match="duration_seconds"):
+        logger.append(
+            task_id="negative-duration",
+            route=route,
+            status="PASSED",
+            returncode=0,
+            duration_seconds=-0.1,
+        )
+    assert _usage_rows(tmp_path) == []
+
+
+def test_calibration_ignores_malformed_manual_token_values(tmp_path) -> None:
+    task = TaskSpec(id="t", title="Task", prompt="Implement feature")
+    plan = Plan(project="demo", tasks=[task])
+    store = StateStore(tmp_path)
+    state = store.ensure_for_plan(plan)
+    state["tasks"]["t"].update(
+        {
+            "status": "PASSED",
+            "attempts": 1,
+            "route": {"level": "MEDIUM"},
+            "route_history": [{"attempt": 1, "level": "MEDIUM"}],
+        }
+    )
+    store.save(state)
+    path = tmp_path / ".autodev" / "usage.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "task_id": "t",
+                "level": "MEDIUM",
+                "input_tokens": True,
+                "output_tokens": -7,
+                "duration_seconds": False,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = OutcomeCalibrator(tmp_path, plan, store).run()
+    assert report.usage_record_count == 1
+    assert report.token_record_count == 0
+    assert report.input_tokens == 0
+    assert report.output_tokens == 0
+    assert report.duration_record_count == 0
+    assert report.observed_execution_duration_seconds == 0.0
 
 
 class _Sessions:
