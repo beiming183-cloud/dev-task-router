@@ -1,0 +1,37 @@
+{
+  "name": "dev-task-router",
+  "version": "0.4.0",
+  "description": "Decompose software projects into staged tasks, classify task difficulty, and route each task to the appropriate model tier without default weak-first escalation.",
+  "author": {
+    "name": "beiming183-cloud"
+  },
+  "homepage": "https://github.com/beiming183-cloud/dev-task-router",
+  "repository": "https://github.com/beiming183-cloud/dev-task-router/tree/main/plugins/dev-task-router",
+  "keywords": [
+    "software-development",
+    "task-decomposition",
+    "model-routing",
+    "workflow",
+    "planning",
+    "handoff",
+    "token-optimization",
+    "developer-tools"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "项目拆解器",
+    "shortDescription": "按任务难度拆解并路由开发工作",
+    "longDescription": "把一个软件开发目标拆成 Project / Stage / Step / Task，按实际复杂度把每个任务分为 NONE、LOW、MEDIUM 或 HIGH，并生成可执行顺序、验收条件和最小上下文 handoff。核心原则是难度优先路由：简单任务直接交给低档位，中等任务直接交给中档位，复杂任务直接交给高档位；失败默认在原档位重试，不把弱模型试错当作常规流程。",
+    "developerName": "beiming183-cloud",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive"
+    ],
+    "websiteURL": "https://github.com/beiming183-cloud/dev-task-router",
+    "defaultPrompt": [
+      "把这个开发目标拆成阶段和任务，并按难度分配模型档位。",
+      "检查这份开发计划有没有把简单任务错误地交给高档位模型。",
+      "为下一个模型生成最小上下文 handoff。"
+    ]
+  }
+}
