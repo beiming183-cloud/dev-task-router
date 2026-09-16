@@ -29,6 +29,8 @@ response monitor
   ↓
 Checker / Git evidence
   ↓
+Execution Evidence / Recovery / Audit
+  ↓
 Rolling Context delta
   ↓
 next Task
@@ -183,7 +185,67 @@ autodev-local continue --max-cycles 10 --json
 
 `continue` 可以跨 PASS、真实 CHECK failure 的升级重试、成功的 deterministic NONE；遇到 WAITING_RESPONSE、REVIEW_REQUIRED、DEBUG_TASK_REQUIRED、BLOCKED/FAILED 或基础设施错误立即停，并受 `max_cycles` 硬上限保护。
 
-自动回归当前达到 **89 passed**。这不等于 Windows ChatGPT 真机验收；真实 selector/model/effort/composer/response labels 仍需以后在目标客户端校准。
+## V0.9 — Execution Evidence / Recovery / Repository Sync
+
+V0.9 stacked candidate 在 V0.8 的执行状态机上补齐“崩溃之后还能知道发生了什么”。重点不是更激进地自动发送，而是让执行边界可恢复、可审计、可与 GitHub 事实对齐。
+
+### Append-only Execution Evidence
+
+本地运行证据：
+
+```text
+.autodev/execution-evidence.jsonl
+```
+
+使用 SHA-256 hash chain 串联 compact event，记录 PREPARED / SUBMITTED / RESPONSE_COLLECTED / CHECKED / STATE_RECORDED 等边界，不复制完整聊天记录。
+
+`evidence` 可检查链完整性；`audit` 交叉核验 response digest、session、dispatch ledger、workflow `local_dispatch_id` 和 terminal state。
+
+### PREPARED / ambiguous-send 恢复
+
+核心原则：**未知发送边界不猜测，也不自动二次发送。**
+
+```text
+PREPARED + 无 dispatch reservation → SAFE_RETRY
+PREPARED + submitted              → RESUME
+PREPARED + submitting + 已验证 post-baseline 活动 → RESUME
+PREPARED + submitting + 无法证明发送结果          → AMBIGUOUS / stop
+```
+
+后续 crash point 也支持幂等恢复，例如 response 文件已落盘但 session metadata 尚未更新，或 workflow state 已记录结果但 session 仍停在 `CHECKED`/`REVIEW_REQUIRED`。同一 dispatch 恢复时不能重复增加 attempt 或重复追加 failure。
+
+### Independent Reviewer 边界
+
+同一个 canonical ChatGPT conversation 不能因为再发一句“独立审查”就算 independent Reviewer。
+
+V0.9 只有在显式配置了独立外部 reviewer executor 且 gate 通过时才允许自动 Review；Reviewer executable/transport/process/protocol 故障属于基础设施问题，不消耗新的实现 attempt。明确的 Reviewer `FAIL` 才能作为真正 Task 验证失败证据。
+
+### Repository anchor 同步
+
+本地 Checker PASS 不等于 GitHub 上已经有对应 commit。
+
+只有：
+
+```text
+repo-context commit 已知
++ CI == success
++ local HEAD == repo-context commit
++ 业务 worktree 干净
+```
+
+才允许通过 `sync-repository` 推进 rolling `last_commit`，避免把未 commit/push 的本地代码误写成远端事实。
+
+### V0.9 CLI
+
+```text
+autodev-local recover --json
+autodev-local evidence --json
+autodev-local evidence --dispatch-id <id> --json
+autodev-local audit --json
+autodev-local sync-repository --json
+```
+
+Windows selector/model/effort/composer/response 的真实客户端校准仍由用户暂缓，因此相关 UIA 能力只称为**已实现、未 live-verified**，默认继续关闭。
 
 ## GitHub Repository Context
 
@@ -210,6 +272,7 @@ route-model
 build-context-pack
 switch-local-mode
 prepare-local-execution
+recover-execution
 create-handoff
 ```
 
@@ -227,6 +290,10 @@ create-handoff
 - ModeSwitchController；
 - safe current-conversation sender；
 - response monitor / resumable local session；
+- append-only execution evidence / consistency audit；
+- conservative crash recovery；
+- independent Reviewer gate；
+- strict repository anchor synchronization；
 - deterministic NONE runner；
 - bounded local project loop；
 - Checker / Reviewer contract；
@@ -244,7 +311,7 @@ create-handoff
 - **V0.6 ✅**：GitHub 真实仓库上下文
 - **V0.7 🚧 Draft**：同会话 Exact Mode Switch + Rolling Context / Task Context Pack
 - **V0.8 🚧 Draft**：安全发送 + response resume + Checker + bounded continuous loop
-- **V0.9**：稳定性 / UI drift / repository execution evidence / recovery 校准
+- **V0.9 🚧 Draft candidate**：execution evidence + recovery + audit + independent Reviewer + repository sync
 - **V1.0**：完整轻量本地多模型开发编排
 
 ## 文档
@@ -253,6 +320,7 @@ create-handoff
 - [`docs/V0.6.md`](docs/V0.6.md)
 - [`docs/V0.7.md`](docs/V0.7.md)
 - [`docs/V0.8.md`](docs/V0.8.md)
+- [`docs/V0.9.md`](docs/V0.9.md)
 
 ## 当前状态
 
@@ -260,12 +328,13 @@ create-handoff
 main: V0.6
 PR #7 Draft: V0.7 foundation
 PR #8 Draft (stacked on #7): V0.8 execution loop
+V0.9 branch: feature/v0.9-recovery-evidence
 ```
 
-V0.7/V0.8 的自动回归可以继续推进，但 Windows 真机校准暂缓期间不会把 Draft 标成“已完成并验证”。
+V0.7/V0.8/V0.9 的自动回归可以继续推进，但 Windows 真机校准暂缓期间不会把相关 UIA 能力写成“已 live-verified”。
 
 ---
 
 Dev Task Router 的目标是：
 
-> **把一个复杂项目拆成不同难度的 Task，在同一个项目会话里让简单任务少想、复杂任务多想，同时用 Rolling Context、GitHub、客观 Checker 和 actual-profile 验证维持长期正确性。**
+> **把一个复杂项目拆成不同难度的 Task，在同一个项目会话里让简单任务少想、复杂任务多想，同时用 Rolling Context、GitHub、客观 Checker、execution evidence 和 actual-profile 验证维持长期正确性。**
