@@ -14,6 +14,7 @@ from .conversation_ui import (
     WindowsUIAConversationBackend,
     load_local_conversation_config,
 )
+from .debug_task import DebugTaskActivator
 from .deterministic_runner import DeterministicTaskRunner
 from .evidence_cycle import EvidenceTrackingCycle
 from .execution_audit import LocalExecutionAuditor
@@ -363,6 +364,24 @@ def cmd_sync_repository(args: argparse.Namespace) -> int:
     return 0 if result.accepted else 1
 
 
+def cmd_activate_debug(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    plan = load_plan(root)
+    store = StateStore(root)
+    result = DebugTaskActivator(root, plan, store).activate(args.task_id)
+    payload = result.to_dict()
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        action = "inserted" if result.inserted else "already active"
+        print(f"source task: {result.source_task_id}")
+        print(f"debug task: {result.debug_task_id}")
+        print(f"candidate: {result.candidate_path}")
+        print(f"activation: {action}")
+        print("the debug Task will be classified independently before the failed NONE source is rechecked")
+    return 0
+
+
 def cmd_continue(args: argparse.Namespace) -> int:
     root = project_root(args.root)
     result = _project_loop(root).run_until_blocked(max_cycles=args.max_cycles)
@@ -456,6 +475,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sync_repo.add_argument("--json", action="store_true", help="print repository reconciliation as JSON")
     sync_repo.set_defaults(func=cmd_sync_repository)
+
+    activate = sub.add_parser(
+        "activate-debug",
+        help="insert a materialized debug Task before its failed deterministic source without promoting NONE",
+    )
+    activate.add_argument(
+        "task_id",
+        nargs="?",
+        help="failed deterministic source task id; defaults to the first waiting debug failure",
+    )
+    activate.add_argument("--json", action="store_true", help="print activation details as JSON")
+    activate.set_defaults(func=cmd_activate_debug)
 
     continuous = sub.add_parser(
         "continue",
