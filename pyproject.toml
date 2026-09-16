@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dev-task-router"
-version = "0.8.0"
-description = "Repository-aware task decomposition, rolling context, local exact mode gating, and same-conversation execution contracts for AI-assisted development"
+version = "0.9.0"
+description = "Repository-aware task routing with rolling context, same-conversation execution, recovery, evidence auditing, and fail-closed review boundaries"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
