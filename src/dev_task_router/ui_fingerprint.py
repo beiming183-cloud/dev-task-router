@@ -61,20 +61,16 @@ class UIFingerprint:
                 name = str(row.get("name", ""))
                 control_type = _norm(row.get("control_type", ""))
                 automation_id = str(row.get("automation_id", "")).strip()
-                matched: list[str] = []
                 for key in sorted(tracked_labels):
-                    if _matches(name, tracked_labels[key]):
-                        hits[key] += 1
-                        matched.append(key)
-
-                # Do not persist or hash arbitrary UI text such as conversation titles.
-                # Stable evidence uses automation ids and configured selector categories only.
-                if automation_id:
+                    if not _matches(name, tracked_labels[key]):
+                        continue
+                    hits[key] += 1
+                    # Only controls that match configured selectors participate in the
+                    # structural digest. Dynamic message/title automation ids are ignored.
+                    # The configured label text itself is never persisted or hashed.
                     stable_entries.append(
-                        f"{source}|id|{control_type}|{automation_id}"
+                        f"{source}|tracked|{key}|{control_type}|{automation_id}"
                     )
-                for key in matched:
-                    stable_entries.append(f"{source}|tracked|{key}|{control_type}")
 
         canonical = {
             "platform": platform or sys.platform,
@@ -192,7 +188,7 @@ class UIFingerprintStore:
                 if before != after:
                     reasons.append(f"tracked selector {key!r} hits changed: {before} -> {after}")
         if baseline.digest != current.digest:
-            reasons.append("stable UI structure digest changed")
+            reasons.append("calibrated selector structure digest changed")
 
         return UIFingerprintComparison(
             status="DRIFT" if reasons else "MATCH",
