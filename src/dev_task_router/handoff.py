@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .config import HANDOFF_FILE, autodev_dir, load_repository_context
+from .config import (
+    HANDOFF_FILE,
+    autodev_dir,
+    load_models,
+    load_repository_context,
+    load_rolling_context,
+)
 from .models import Plan, TaskStatus
+from .rolling_context import ContextPackBuilder
+from .router import RuleRouter
 
 
 class HandoffWriter:
@@ -17,11 +25,13 @@ class HandoffWriter:
             for task in plan.tasks
             if state["tasks"][task.id]["status"] == TaskStatus.PASSED.value
         ]
-        pending = [
-            task.id
+        pending_tasks = [
+            task
             for task in plan.tasks
             if state["tasks"][task.id]["status"] != TaskStatus.PASSED.value
         ]
+        next_task = pending_tasks[0] if pending_tasks else None
+
         lines = [
             "# AutoDev Handoff",
             "",
@@ -29,50 +39,64 @@ class HandoffWriter:
             f"- Workflow: `{state['status']}`",
             f"- Current task: `{state.get('current_task') or 'none'}`",
             f"- Completed: {len(passed)}/{len(plan.tasks)}",
-            f"- Next unresolved: `{pending[0] if pending else 'none'}`",
+            f"- Next unresolved: `{next_task.id if next_task else 'none'}`",
+            "- Conversation policy: keep the same canonical project conversation when possible.",
         ]
 
         repo = load_repository_context(self.root)
-        if repo is not None:
-            compact = repo.compact(max_files=12, max_facts=6)
+        rolling = load_rolling_context(self.root, project=plan.project)
+
+        if next_task is not None:
+            route = RuleRouter(load_models(self.root), repository_context=repo).route(next_task)
+            requested_route = {
+                "level": route.level.value,
+                "provider": route.profile.provider,
+                "model": route.profile.model,
+                "executor": route.profile.executor,
+                "reason": route.reason,
+                "confidence": route.confidence,
+            }
+            pack = ContextPackBuilder().build(
+                plan,
+                state,
+                next_task,
+                rolling,
+                repository=repo,
+                requested_route=requested_route,
+            )
+            pack_text = pack.to_markdown().strip().splitlines()
+            # Replace the pack's H1 so the handoff remains one document.
+            lines.extend(["", "## Next Task Context Pack", ""])
+            if pack_text and pack_text[0].startswith("# "):
+                pack_text = pack_text[1:]
+                if pack_text and not pack_text[0].strip():
+                    pack_text = pack_text[1:]
+            lines.extend(pack_text)
+        elif repo is not None:
+            compact = repo.compact(max_files=8, max_facts=4)
             lines.extend(
                 [
                     "",
-                    "## Repository evidence",
+                    "## Final repository anchor",
                     "",
-                    f"- Source: `{compact['source']}`",
                     f"- Repository: `{compact['repository']}`",
                     f"- Branch: `{compact['branch'] or 'unknown'}`",
                     f"- Commit: `{compact['commit'] or 'unanchored'}`",
-                    f"- PR: `{compact['pr_number'] or 'none'}`",
                     f"- CI: `{compact['ci_status']}`",
                 ]
             )
-            if compact["ci_checks"]:
-                lines.append(f"- CI checks: {', '.join(compact['ci_checks'])}")
-            if compact["files"]:
-                lines.append("- Relevant files:")
-                lines.extend(f"  - `{path}`" for path in compact["files"])
-                if compact["file_count_total"] > len(compact["files"]):
-                    lines.append(
-                        f"  - ... {compact['file_count_total'] - len(compact['files'])} more omitted"
-                    )
-            if compact["evidence_tags"]:
-                lines.append(f"- Evidence tags: {', '.join(compact['evidence_tags'])}")
-            if compact["facts"]:
-                lines.append("- Verified facts:")
-                lines.extend(f"  - {fact}" for fact in compact["facts"])
 
         lines.extend(
             [
                 "",
-                "## Tasks",
+                "## Unresolved task ledger",
                 "",
                 "| Stage | Step | Role | Task | Status | Attempts | Route | Last failure |",
                 "| --- | --- | --- | --- | --- | ---: | --- | --- |",
             ]
         )
-        for task in plan.tasks:
+        visible = pending_tasks[:10]
+        for task in visible:
             item = state["tasks"][task.id]
             route = item.get("route") or {}
             route_text = "-"
@@ -90,13 +114,22 @@ class HandoffWriter:
                 f"| {task.stage_id} | {task.step_id} | {task.role.value} | {task.id} | "
                 f"{item['status']} | {item.get('attempts', 0)} | {route_text} | {failure_text} |"
             )
+        if len(pending_tasks) > len(visible):
+            lines.append(
+                f"\n_{len(pending_tasks) - len(visible)} additional unresolved task(s) omitted; "
+                "use `autodev plan` for the full plan._"
+            )
+        if not pending_tasks:
+            lines.append("| - | - | - | - | all passed | - | - | - |")
+
         lines.extend(
             [
                 "",
                 "## Resume rule",
                 "",
-                "Read this file plus the relevant task files; do not replay old chat history.",
-                "Treat the repository commit above as the evidence anchor. If the branch moved, refresh GitHub evidence before making scope-sensitive decisions.",
+                "Continue the same canonical conversation when possible; do not create a new chat merely to change reasoning effort.",
+                "Use the Next Task Context Pack plus the relevant files; do not replay old chat history.",
+                "Treat the repository commit above as the evidence anchor. If the branch moved, refresh commit-sensitive facts before making scope-sensitive decisions.",
                 "If the workflow is FAILED/BLOCKED, inspect the last failure before using `autodev retry <task>`.",
                 "",
             ]
