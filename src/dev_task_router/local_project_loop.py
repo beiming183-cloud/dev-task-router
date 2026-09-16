@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import load_rolling_context, save_rolling_context
+from .deterministic_runner import DeterministicTaskRunner
 from .handoff import HandoffWriter
 from .local_session import LocalCycleResult, LocalTaskCycle
 from .models import Plan
@@ -31,12 +32,14 @@ class LocalProjectLoopResult:
 
 
 class LocalProjectLoop:
-    """Bounded project-level loop over LocalTaskCycle.
+    """Bounded project-level loop over model and deterministic Task execution.
 
     Only verified PASS facts are written into rolling context. The assistant response
     is never mined for durable decisions or constraints. CHECK_FAILED may continue to
     another model attempt because it is genuine execution evidence; infrastructure
-    and ambiguous states always stop the loop.
+    and ambiguous states always stop the loop. Successful NONE tasks can run locally
+    and continue, while deterministic failure stops at DEBUG_TASK_REQUIRED instead of
+    being promoted as a model-difficulty failure.
     """
 
     CONTINUE_STATUSES = {"PASSED", "CHECK_FAILED"}
@@ -47,11 +50,14 @@ class LocalProjectLoop:
         plan: Plan,
         store: StateStore,
         cycle: LocalTaskCycle,
+        *,
+        deterministic_runner: DeterministicTaskRunner | None = None,
     ):
         self.root = root
         self.plan = plan
         self.store = store
         self.cycle = cycle
+        self.deterministic_runner = deterministic_runner
         self.handoff = HandoffWriter(root)
 
     def _task_title(self, task_id: str) -> str:
@@ -70,9 +76,12 @@ class LocalProjectLoop:
         if result.status != "PASSED" or not result.task_id:
             return
         rolling = load_rolling_context(self.root, project=self.plan.project)
-        dispatch = (result.dispatch_id or "none")[:12]
         title = self._task_title(result.task_id)
-        task_note = f"Verified PASS by Checker; dispatch={dispatch}."
+        if result.dispatch_id:
+            dispatch = result.dispatch_id[:12]
+            task_note = f"Verified PASS by Checker; dispatch={dispatch}."
+        else:
+            task_note = "Verified deterministic PASS by command/checker."
         stage_note = f"Verified PASS {result.task_id}: {title}."
         updated_at = now_iso()
         rolling = rolling.with_task_note(
@@ -91,6 +100,20 @@ class LocalProjectLoop:
 
     def run_one(self) -> LocalCycleResult:
         result = self.cycle.run_next()
+        if result.status == "DETERMINISTIC" and self.deterministic_runner is not None:
+            task = self.cycle.orchestrator.next_task()
+            if task is None:
+                result = LocalCycleResult("", "NO_TASK", None, False, "workflow has no unresolved task")
+            else:
+                deterministic = self.deterministic_runner.run(task)
+                result = LocalCycleResult(
+                    deterministic.task_id,
+                    deterministic.status,
+                    None,
+                    False,
+                    deterministic.message,
+                    check=deterministic.check,
+                )
         self._record_verified_pass(result)
         return result
 
