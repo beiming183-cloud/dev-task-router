@@ -23,6 +23,7 @@ from .local_project_loop import LocalProjectLoop
 from .local_session import LocalTaskCycle
 from .mode_switch import DryRunModeSwitchBackend, WindowsUIAModeSwitchBackend
 from .recovery import LocalRecoveryController
+from .repository_reconcile import RepositoryEvidenceReconciler
 from .response_monitor import ConversationResponseMonitor
 from .state import StateStore
 
@@ -280,7 +281,13 @@ def cmd_recover(args: argparse.Namespace) -> int:
         print(f"safe to retry: {'yes' if result.safe_to_retry else 'no'}")
         print(f"resumable: {'yes' if result.resumable else 'no'}")
         print(result.message)
-    return 0 if result.status in {"NO_TASK", "SAFE_RETRY", "RESUME", "ALREADY_RESUMABLE"} else 1
+    return 0 if result.status in {
+        "NO_TASK",
+        "SAFE_RETRY",
+        "RESUME",
+        "ALREADY_RESUMABLE",
+        "RECOVERED_STATE",
+    } else 1
 
 
 def cmd_evidence(args: argparse.Namespace) -> int:
@@ -331,6 +338,27 @@ def cmd_audit(args: argparse.Namespace) -> int:
             suffix = f" ({', '.join(where)})" if where else ""
             print(f"{issue.severity} {issue.code}: {issue.message}{suffix}")
     return 0 if report.ok else 1
+
+
+def cmd_sync_repository(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    result = RepositoryEvidenceReconciler(root).reconcile(require_ci_success=True)
+    payload = result.to_dict()
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"repository sync: {'ACCEPTED' if result.accepted else 'BLOCKED'}")
+        print(f"status: {result.status}")
+        print(f"repository: {result.repository or 'unknown'}")
+        print(f"commit: {result.commit or 'unanchored'}")
+        print(f"ci: {result.ci_status or 'unknown'}")
+        print(f"local HEAD: {result.local_head or 'unknown'}")
+        if result.dirty_paths:
+            print("dirty business paths:")
+            for path in result.dirty_paths:
+                print(f"- {path}")
+        print(result.message)
+    return 0 if result.accepted else 1
 
 
 def cmd_continue(args: argparse.Namespace) -> int:
@@ -400,7 +428,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     recover = sub.add_parser(
         "recover",
-        help="reconcile a PREPARED/ambiguous local send using durable dispatch and calibrated response evidence",
+        help="reconcile crash/ambiguous local execution boundaries without automatic duplicate sends",
     )
     recover.add_argument("--json", action="store_true", help="print the recovery result as JSON")
     recover.set_defaults(func=cmd_recover)
@@ -419,6 +447,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     audit.add_argument("--json", action="store_true", help="print the audit report as JSON")
     audit.set_defaults(func=cmd_audit)
+
+    sync_repo = sub.add_parser(
+        "sync-repository",
+        help="advance rolling commit anchor only when GitHub context/CI and clean local HEAD agree",
+    )
+    sync_repo.add_argument("--json", action="store_true", help="print repository reconciliation as JSON")
+    sync_repo.set_defaults(func=cmd_sync_repository)
 
     continuous = sub.add_parser(
         "continue",
