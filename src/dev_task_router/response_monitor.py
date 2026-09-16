@@ -68,6 +68,10 @@ class ConversationResponseMonitor:
     The monitor does not interpret assistant content as Task success. It only decides
     whether a new assistant response appears to have stopped changing. Callers must
     still run Checker/Git verification after collection.
+
+    `stable_polls` means *additional unchanged confirmations after the first observed
+    candidate*. This is deliberately conservative so a brief pause in streamed text
+    does not immediately count as completion.
     """
 
     def __init__(
@@ -112,15 +116,16 @@ class ConversationResponseMonitor:
         polls = 0
         saw_activity = False
         stable_text = ""
-        stable_count = 0
+        unchanged_confirmations = 0
         latest_seen = ""
-        latest_is_new = False
+        latest_seen_is_new = False
 
         while True:
             snapshot = self.source.snapshot()
             polls += 1
             latest = self._latest(snapshot.messages)
-            latest_seen = latest or latest_seen
+            if latest:
+                latest_seen = latest
 
             changed_from_baseline = bool(
                 latest
@@ -129,35 +134,37 @@ class ConversationResponseMonitor:
                     or _digest(latest) != baseline.latest_digest
                 )
             )
-            latest_is_new = changed_from_baseline
+            if changed_from_baseline:
+                latest_seen_is_new = True
             if snapshot.busy or changed_from_baseline:
                 saw_activity = True
 
             if saw_activity and changed_from_baseline and not snapshot.busy:
                 if latest == stable_text:
-                    stable_count += 1
+                    unchanged_confirmations += 1
                 else:
                     stable_text = latest
-                    stable_count = 1
-                if stable_count >= self.stable_polls:
+                    unchanged_confirmations = 0
+                if unchanged_confirmations >= self.stable_polls:
                     return ResponseCollectionResult(
                         completed=True,
                         response_text=latest,
                         polls=polls,
                         saw_activity=True,
                         reason=(
-                            f"new assistant response remained stable for {self.stable_polls} poll(s) "
+                            "new assistant response received "
+                            f"{self.stable_polls} unchanged confirmation poll(s) "
                             "with no busy indicator"
                         ),
                     )
             else:
                 stable_text = ""
-                stable_count = 0
+                unchanged_confirmations = 0
 
             if self.clock() - started_at >= self.timeout_seconds:
                 return ResponseCollectionResult(
                     completed=False,
-                    response_text=latest_seen if latest_is_new else "",
+                    response_text=latest_seen if latest_seen_is_new else "",
                     polls=polls,
                     saw_activity=saw_activity,
                     reason="response collection timed out before a stable new assistant response was verified",
