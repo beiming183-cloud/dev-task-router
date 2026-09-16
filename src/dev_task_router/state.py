@@ -25,6 +25,7 @@ class StateStore:
         return {
             "status": TaskStatus.PENDING.value,
             "attempts": 0,
+            "retry_cycles": 0,
             "last_error": None,
             "last_failure_type": None,
             "started_at": None,
@@ -87,6 +88,7 @@ class StateStore:
             task_state.setdefault("failures", [])
             task_state.setdefault("review", None)
             task_state.setdefault("last_failure_type", None)
+            task_state.setdefault("retry_cycles", 0)
         self.save(state)
         return state
 
@@ -96,8 +98,11 @@ class StateStore:
             raise ValueError(f"unknown task: {task_id}")
         item = state["tasks"][task_id]
         item["status"] = TaskStatus.PENDING.value
+        item["attempts"] = 0
+        item["retry_cycles"] = int(item.get("retry_cycles", 0)) + 1
         item["last_error"] = None
         item["last_failure_type"] = None
+        item["started_at"] = None
         item["finished_at"] = None
         item["review"] = None
         state["status"] = WorkflowStatus.READY.value
