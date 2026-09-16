@@ -1,13 +1,13 @@
 ---
 name: dev-task-router-index
-description: "Shared rules for the 项目拆解器 plugin. Use with the other Dev Task Router skills to inspect repository evidence, decompose software work, classify difficulty, choose surface-specific model routes, define verification, and create compact handoffs."
+description: "Shared rules for the 项目拆解器 plugin. Use with the other Dev Task Router skills to inspect repository evidence, decompose software work, classify difficulty, route tasks, switch the local ChatGPT execution profile when available, verify results, and create compact handoffs."
 ---
 
 # 项目拆解器 — Shared Rules
 
 ## Purpose
 
-Turn a software-development goal into a small, explicit workflow where each task is classified by engineering difficulty first, then mapped onto the models available in the current execution surface.
+Turn a software-development goal into a small, explicit workflow where each Task is classified by engineering difficulty first, then mapped onto the current execution surface.
 
 The primary principle is **difficulty-first, surface-second routing**:
 
@@ -18,10 +18,30 @@ NONE / LOW / MEDIUM / HIGH
     ↓
 chat / codex / work / other
     ↓
-surface-specific model + effort
+requested model + effort
 ```
 
 Do not deliberately start every task on a weak model. The first attempt should use the tier predicted from the task itself.
+
+## Canonical conversation rule
+
+For a complex project, Task decomposition does **not** imply conversation decomposition.
+
+Prefer one canonical project conversation whenever the execution surface allows it:
+
+```text
+same conversation
+  ↓
+Task A → LOW
+  ↓ local exact switch
+Task B → HIGH
+  ↓ local exact switch
+Task C → MEDIUM
+```
+
+Do not create separate LOW/MEDIUM/HIGH chats merely to obtain different reasoning tiers. The local Windows companion exists specifically to change the current conversation profile while preserving conversation continuity.
+
+A route is only a **requested** profile. When local exact switching is used, execution should continue only after the matching **actual** profile is verified.
 
 ## Repository evidence before guessing
 
@@ -54,7 +74,7 @@ Use targeted evidence, not a repository dump. A normal handoff should carry only
 
 ## Difficulty is not a model name
 
-`LOW`, `MEDIUM`, and `HIGH` describe the task.
+`LOW`, `MEDIUM`, and `HIGH` describe the Task.
 
 They do not mean:
 - cheapest / medium-price / expensive;
@@ -148,6 +168,8 @@ codex/work:
 
 Do not invent a strength ordering between Codex/Work families when the user has not configured one.
 
+When a local Chat route is resolved and local exact switching is available, use `switch-local-mode` before executing the next model task.
+
 ## Failure reclassification
 
 A genuine reasoning/implementation failure is evidence that the first difficulty estimate may have been too low:
@@ -166,9 +188,14 @@ Do not promote when the failure is clearly infrastructure-related, including:
 - permissions;
 - network/DNS failures;
 - rate limits/quota;
-- service outage.
+- service outage;
+- local UI selector not found;
+- ChatGPT window unavailable;
+- local mode switch could not be verified.
 
-When promotion happens, record why: for example,
+A local mode-switch failure should be recorded as `MODE_SWITCH` (or equivalent execution infrastructure evidence), not as proof that the Task needs a stronger model.
+
+When genuine Task failure causes promotion, record why: for example,
 `previous MEDIUM attempt failed verification; complexity underestimated`.
 
 ## Decomposition rules
@@ -205,6 +232,8 @@ When GitHub evidence exists, prefer acceptance criteria that name the relevant t
 
 AI text such as “done” is not completion evidence.
 
+When local exact mode switching is used, `verified: true` for the requested profile is a prerequisite for executing the next model task; it is not itself evidence that the coding task is complete.
+
 ## Handoff rules
 
 A handoff should contain only what the next task needs:
@@ -212,6 +241,7 @@ A handoff should contain only what the next task needs:
 - current goal;
 - difficulty;
 - current execution surface and resolved/unresolved route;
+- requested/actual profile when local switching was used;
 - repository / branch / commit anchor when available;
 - relevant files/modules/tests;
 - constraints that must not change;
