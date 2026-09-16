@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from dev_task_router.response_monitor import (
     ConversationResponseMonitor,
+    ResponseBaseline,
     ResponseSnapshot,
 )
 
@@ -59,7 +60,7 @@ def test_busy_then_stable_new_response_completes() -> None:
     assert result.completed is True
     assert result.response_text == "done"
     assert result.saw_activity is True
-    assert result.polls == 4
+    assert result.polls == 5
 
 
 def test_streaming_text_change_resets_stable_counter() -> None:
@@ -76,7 +77,20 @@ def test_streaming_text_change_resets_stable_counter() -> None:
 
     assert result.completed is True
     assert result.response_text == "part 2"
-    assert result.polls == 4
+    assert result.polls == 5
+
+
+def test_compact_baseline_detects_new_message_without_storing_old_text() -> None:
+    baseline = ResponseBaseline.from_messages(("old answer",))
+    source = SequenceSource([ResponseSnapshot(False, ("old answer", "new answer"))])
+
+    result = _monitor(source, stable=1).collect(baseline=baseline)
+
+    assert baseline.message_count == 1
+    assert baseline.latest_digest
+    assert "old answer" not in str(baseline.to_dict())
+    assert result.completed is True
+    assert result.response_text == "new answer"
 
 
 def test_unchanged_baseline_never_counts_as_new_response() -> None:
