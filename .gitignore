@@ -11,3 +11,5 @@ build/
 .autodev/local-sessions.json
 .autodev/local-responses/
 .autodev/execution-evidence.jsonl
+.autodev/ui-fingerprint.json
+.autodev/debug-tasks/
