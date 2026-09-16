@@ -126,3 +126,33 @@ def test_missing_command_becomes_failed_state(tmp_path: Path) -> None:
     assert state["status"] == WorkflowStatus.FAILED.value
     assert state["tasks"]["missing"]["status"] == "FAILED"
     assert state["tasks"]["missing"]["last_error"]
+
+
+def test_failed_workflow_is_not_retried_by_start(tmp_path: Path) -> None:
+    write_default_files(tmp_path, "demo")
+    plan_path = autodev_dir(tmp_path) / "plan.yaml"
+    plan_path.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "project": "demo",
+                "tasks": [
+                    {
+                        "id": "fail-once",
+                        "title": "fail once",
+                        "model": "NONE",
+                        "command": [sys.executable, "-c", "raise SystemExit(3)"],
+                    }
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    plan = load_plan(tmp_path)
+    store = StateStore(tmp_path)
+    first = WorkflowEngine(tmp_path, plan, store).run()
+    assert first["tasks"]["fail-once"]["attempts"] == 1
+    assert main(["--root", str(tmp_path), "start"]) == 1
+    second = store.load()
+    assert second["tasks"]["fail-once"]["attempts"] == 1
