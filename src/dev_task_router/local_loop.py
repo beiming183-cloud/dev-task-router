@@ -10,7 +10,7 @@ from .config import (
     load_rolling_context,
     load_surfaces,
 )
-from .mode_switch import ModeSwitchBackend, ModeSwitchController, RequestedProfile, SwitchResult
+from .mode_switch import ModeSwitchBackend, RequestedProfile, SwitchResult
 from .models import ModelLevel, Plan, TaskSpec, TaskStatus
 from .retry import level_for_attempt
 from .rolling_context import ContextPackBuilder, TaskContextPack
@@ -151,9 +151,8 @@ class LocalConversationOrchestrator:
 
     V0.8 deliberately separates preparation/gating from a real UI conversation driver.
     A task may only reach ConversationBackend after the requested non-NONE profile has
-    been verified by ModeSwitchController. Preparing a task never increments attempts
-    or mutates Task status, so UI/infrastructure failures cannot accidentally trigger
-    difficulty escalation.
+    been verified. Preparing a task never increments attempts or mutates Task status,
+    so UI/infrastructure failures cannot accidentally trigger difficulty escalation.
     """
 
     def __init__(
@@ -178,6 +177,13 @@ class LocalConversationOrchestrator:
         self.conversation_backend = conversation_backend or DryRunConversationBackend()
         self.surface = surface
         self.context_builder = context_builder or ContextPackBuilder()
+
+    def _refresh_context(self) -> None:
+        """Refresh mutable project evidence before preparing every new model Task."""
+        self.repository = load_repository_context(self.root)
+        self.rolling = load_rolling_context(self.root, project=self.plan.project)
+        self.router = RuleRouter(load_models(self.root), repository_context=self.repository)
+        self.surfaces = load_surfaces(self.root)
 
     def next_task(self) -> TaskSpec | None:
         state = self.store.ensure_for_plan(self.plan)
@@ -220,6 +226,7 @@ class LocalConversationOrchestrator:
         if task is None:
             raise ValueError("workflow has no unresolved task")
 
+        self._refresh_context()
         state = self.store.ensure_for_plan(self.plan)
         route = self._route_for_next_attempt(task)
         deterministic = route.level == ModelLevel.NONE
@@ -300,7 +307,6 @@ class LocalConversationOrchestrator:
                 message="no local mode-switch backend is configured",
             )
 
-        controller = ModeSwitchController(self.surfaces, self.mode_backend)
         result = self.mode_backend.switch(envelope.requested_profile)
         if not result.verified:
             return LocalExecutionGate(
