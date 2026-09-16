@@ -65,52 +65,28 @@ User request    = 目标状态
 
 ---
 
-## V0.7 — Same-Conversation Foundation 🚧
+## V0.7 — Same-Conversation Foundation 🚧 Draft
 
-目标：让一个复杂项目长期保持**同一个 canonical ChatGPT conversation**，同时解决两个问题：
-
-```text
-不同 Task 需要不同 reasoning profile
-+
-同一聊天窗口不可能无限承载全部历史细节
-```
+目标：让复杂项目长期保持**同一个 canonical ChatGPT conversation**，同时支持按 Task 切 reasoning profile，并控制长项目上下文。
 
 ### A. Local Exact Mode Switch
 
-当前 candidate 已实现：
+已实现 candidate：
 
-- `RequestedProfile`
-- `SwitchResult`
-- `ModeSwitchController`
-- `ModeSwitchBackend` 协议
-- `DryRunModeSwitchBackend`
-- `WindowsUIAModeSwitchBackend`
+- `RequestedProfile / SwitchResult`
+- `ModeSwitchController / ModeSwitchBackend`
+- `DryRunModeSwitchBackend / WindowsUIAModeSwitchBackend`
 - `.autodev/local-switch.yaml`
 - `autodev-mode probe`
 - `autodev-mode switch LOW|MEDIUM|HIGH`
-- `requested` / `actual` profile 分离
+- requested / actual profile 分离
 - Windows UI Automation/accessibility 驱动
 - 禁止固定屏幕坐标
-- selector / family / effort / verify labels 全部配置化
+- selector / family / effort / verify labels 配置化
 - 默认禁用，必须先校准
-- UI 动作后无法验证则返回失败，不声称已经切换
-- 模式切换失败属于 `MODE_SWITCH`/执行基础设施问题，不触发 Difficulty 上调
+- `verified: true` 才认为切换成功
+- MODE_SWITCH 基础设施失败不提升 Difficulty
 - Skill：`switch-local-mode`
-- optional dependency：`pywinauto`
-
-本地验收流程：
-
-```text
-打开 canonical ChatGPT conversation
-↓
-autodev-mode probe --json
-↓
-校准 .autodev/local-switch.yaml
-↓
-分别验证 LOW / MEDIUM / HIGH
-↓
-每次必须 verified: true
-```
 
 Windows 真机校准由用户暂缓，因此 PR #7 保持 Draft；其余自动可验证开发继续推进。
 
@@ -119,108 +95,171 @@ Windows 真机校准由用户暂缓，因此 PR #7 保持 Draft；其余自动�
 已实现：
 
 - `.autodev/context.yaml`
-- `RollingProjectContext`
-- `ContextBudget`
-- `TaskContextPack`
-- `ContextPackBuilder`
+- `RollingProjectContext / ContextBudget`
+- `TaskContextPack / ContextPackBuilder`
 - project goal / decisions / constraints / stage notes / task notes
-- 字符串归一化去重
+- normalized dedupe
 - commit-anchor stale detection
-- repository files / facts / CI 的预算化选择
-- recent failure evidence budget
-- acceptance budget
-- requested execution profile 写入 pack
-- `autodev context`
-- `autodev context --import`
-- `autodev context-pack <task>`
-- handoff 改成 **Next Task Context Pack first**
-- PASSED 历史任务不反复占据 handoff
-- unresolved ledger 最多展示 10 个 Task
+- repository facts/files/CI budgets
+- recent failures / acceptance budgets
+- `autodev context / context-pack`
+- handoff 使用 **Next Task Context Pack first**
+- PASSED 历史任务不反复展开
 - Skill：`build-context-pack`
-
-核心链路：
-
-```text
-same canonical conversation
-↓
-rolling project context
-+
-current task-specific repository evidence
-↓
-Task Context Pack
-↓
-requested reasoning profile
-↓
-local exact switch
-↓ verified
-execute Task
-```
-
-Context Pack 的目的不是换窗口，而是让同一个长窗口在项目持续很久后仍有一个小而准确的工作集。
 
 ---
 
-## V0.8 — 本地自动执行闭环
+## V0.8 — 本地同会话自动执行闭环 🚧 Draft
 
-目标：把目前已经存在的“拆解 / 分类 / Context Pack / Mode Switch / Checker”串成自动状态机，而不是要求用户逐条手动执行 CLI。
+V0.8 是 stacked Draft PR #8，base 为 V0.7 branch。自动可验证 candidate 已从“发送前 gate”推进到完整本地状态机骨架。
 
-计划：
-
-- `LocalConversationExecutor` 抽象；
-- Task Ready 时自动生成 Context Pack；
-- 自动请求目标 profile；
-- `verified: true` 后才允许发送 Task；
-- 把 Task prompt + Context Pack 送入当前 canonical conversation；
-- 等待执行结果；
-- 收集 result / diff / test / CI；
-- 更新 workflow state；
-- 只把 durable information 写回 Rolling Context；
-- Task 成功后自动进入下一 Task；
-- 真正 Task failure 才做 `LOW → MEDIUM → HIGH`；
-- Mode/UI/permission/network failure 不升级 Difficulty；
-- pause / resume / recovery；
-- 用户可设置最大连续 Task 数和人工确认边界。
+### A. Execution gate ✅
 
 ```text
 Task Ready
-↓
-Context Pack
-↓
-Difficulty / Route
-↓
-ModeSwitchController
-↓ verified
-Current ChatGPT Conversation
-↓
-Task execution
-↓
-Checker / Reviewer / GitHub evidence
-↓
-Rolling Context update
-↓
-Next Task
+→ fresh Context Pack
+→ Difficulty / requested profile
+→ actual-profile verification
+→ dispatch gate
 ```
 
-API Provider 仍可作为以后可选辅助层，但不是当前主路线；云端 exact switching 暂不作为 V0.8 阻塞项。
+阻塞：
+
+```text
+STALE_CONTEXT
+ROUTE_UNRESOLVED
+MODE_SWITCH_UNAVAILABLE
+MODE_SWITCH
+PROFILE_MISMATCH
+```
+
+基础设施失败不增加 attempts。
+
+### B. Safe current-conversation sender ✅ code / ⏸ live validation
+
+已实现：
+
+- `WindowsUIAConversationBackend`
+- 当前可见 ChatGPT conversation
+- composer selector
+- full prompt write/read-back verification
+- Send selector
+- 禁止固定坐标
+- `.autodev/local-dispatch.json`
+- sticky submitting/submitted duplicate guard
+- duplicate check before touching UI
+
+默认关闭；Windows 真机 selector 尚未校准。
+
+### C. Response monitor / resume ✅ code / ⏸ live validation
+
+已实现：
+
+- `ResponseSnapshot`
+- compact `ResponseBaseline`
+- `ConversationResponseMonitor`
+- `LocalResponseConfig`
+- `WindowsUIAResponseSnapshotSource`
+- conservative stable-response completion
+- `.autodev/local-sessions.json`
+- `.autodev/local-responses/`
+- `WAITING_RESPONSE`
+- same-dispatch resume without resend
+- `CHECKED` crash recovery idempotency
+
+Response baseline 只保存 message count + latest-message SHA-256，不保存整个旧 conversation。
+
+### D. Checker / failure semantics ✅
+
+- response completed 不等于 PASS；
+- assistant 自称完成不等于 PASS；
+- Checker / Git evidence 才决定 Task；
+- `require_diff` 使用 compact pre-dispatch Git snapshot digest；
+- UI / response timeout 不消耗模型 attempt；
+- 真正 CHECK/DIFF failure 才触发下一次 Difficulty promotion；
+- `REVIEW_REQUIRED` 保持独立 Review 边界，不用同一 conversation 假装独立 reviewer。
+
+### E. Rolling Context delta ✅
+
+PASS 后只写入机器验证事实：
+
+```text
+Verified PASS <task>
+Checker verified
+short dispatch id
+```
+
+不从 assistant prose 自动生成 durable decision/constraint，不自动移动 `last_commit`。新 Task 每次 prepare 都重新读取 rolling/repository context，并同步刷新 handoff。
+
+### F. Deterministic NONE ✅
+
+成功：
+
+```text
+NONE command → checks → PASS → next Task
+```
+
+失败：
+
+```text
+NONE command → DEBUG_TASK_REQUIRED → stop
+```
+
+失败的 NONE 不提升到 LOW/MEDIUM/HIGH，也不会自动重复执行；调试必须作为独立 Task 重新分类。
+
+### G. Bounded continuous loop ✅
+
+CLI：
+
+```text
+autodev-local run --json
+autodev-local resume --json
+autodev-local continue --max-cycles 10 --json
+```
+
+可继续：
+
+```text
+PASSED
+CHECK_FAILED → promoted retry
+successful deterministic NONE
+```
+
+必须停止：
+
+```text
+WAITING_RESPONSE
+RECOVERY_REQUIRED
+REVIEW_REQUIRED
+DEBUG_TASK_REQUIRED
+FAILED / BLOCKED
+infrastructure failure
+```
+
+`max_cycles` 防止无限运行。
+
+当前自动回归：**89 passed**。这不是 Windows ChatGPT 真机验收，PR #8 仍保持 Draft。
 
 ---
 
-## V0.9 — 稳定性、恢复与成本校准
+## V0.9 — Execution Evidence / Recovery / Routing Calibration
 
-目标：让本地长时间运行更可靠，并逐步校准“哪些 Task 真正需要更高 reasoning”。
+下一阶段重点不再是把更多状态塞进同一个 loop，而是解决真实长期运行的证据闭环与恢复质量：
 
-计划：
-
-- mode-switch selector drift detection；
-- ChatGPT UI change recovery；
-- stuck-task timeout；
-- duplicate-send protection；
-- execution lease / idempotency；
-- crash recovery；
+- Windows UI selector drift detection / build fingerprint；
+- composer / response selector recovery；
+- PREPARED ambiguous-send 手工/自动 reconciliation；
+- response/session inspection commands；
+- local worktree vs remote GitHub execution evidence synchronization；
+- commit/PR/CI evidence refresh after Task execution；
+- independent Reviewer execution channel；
+- deterministic failure → explicit debug Task materialization；
 - requested vs actual profile audit；
-- predicted difficulty → actual success/failure 统计；
-- 减少无意义 HIGH；
-- usage / token / time 指标。
+- predicted difficulty → actual success/failure calibration；
+- usage / token / time metrics；
+- 减少无意义 HIGH。
+
+API Provider 仍可作为可选执行层，不强绑 OpenAI；DeepSeek/其他 provider adapter 应保持 vendor-neutral，并且必须配合受控工具/patch/checker，而不是把“调用模型 API”误认为“代码已经修改”。
 
 ---
 
@@ -236,8 +275,10 @@ API Provider 仍可作为以后可选辅助层，但不是当前主路线；云�
 - requested/actual profile 验证；
 - GitHub 真实上下文；
 - Rolling Project Context + Task Context Pack；
-- Checker / Reviewer / failure reclassification；
-- 本地自动执行闭环；
+- safe submit / response resume；
+- Checker / independent Reviewer / failure reclassification；
+- deterministic NONE；
+- bounded local continuous execution；
 - pause / resume / recovery。
 
 不作为 V1.0 阻塞项：云端 exact mode switch、自建服务器、多用户、VS Code UI、Agent Swarm。
@@ -246,6 +287,6 @@ API Provider 仍可作为以后可选辅助层，但不是当前主路线；云�
 
 # 当前下一步
 
-V0.7 自动部分继续完成回归；Windows 真机校准暂缓。
-
-随后进入 **V0.8 本地自动执行闭环**：先实现 `Task Ready → Context Pack → requested profile → switch gate` 的执行契约，再接真正的当前 ChatGPT conversation 驱动。
+1. 保持 PR #7 / #8 Draft，不绕过用户暂缓的 Windows 真机校准。
+2. 对 V0.8 最新 head 跑 branch + PR merge-ref 回归。
+3. 进入 V0.9：优先做 **execution evidence refresh / PREPARED reconciliation / independent reviewer boundary**。

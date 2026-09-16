@@ -21,6 +21,7 @@ SURFACES_FILE = "surfaces.yaml"
 REPO_CONTEXT_FILE = "repo-context.yaml"
 ROLLING_CONTEXT_FILE = "context.yaml"
 LOCAL_SWITCH_FILE = "local-switch.yaml"
+LOCAL_CONVERSATION_FILE = "local-conversation.yaml"
 STATE_FILE = "state.json"
 HANDOFF_FILE = "handoff.md"
 USAGE_FILE = "usage.jsonl"
@@ -117,6 +118,17 @@ def load_local_switch(root: Path) -> LocalSwitchConfig:
     return LocalSwitchConfig.from_dict(load_yaml(path))
 
 
+def load_local_conversation_dict(root: Path) -> dict[str, Any]:
+    path = autodev_dir(root) / LOCAL_CONVERSATION_FILE
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            yaml.safe_dump(default_local_conversation(), allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+    return load_yaml(path)
+
+
 def default_models() -> dict[str, Any]:
     return {
         "version": 1,
@@ -178,33 +190,50 @@ def default_surfaces() -> dict[str, Any]:
 
 
 def default_local_switch() -> dict[str, Any]:
-    """Safe-by-default local UIA profile.
+    return {
+        "version": 1,
+        "enabled": False,
+        "backend": "windows-uia",
+        "window": {"title_regex": ".*ChatGPT.*"},
+        "selector": {"open_labels": []},
+        "family_labels": {"sol": []},
+        "effort_labels": {"low": [], "medium": [], "high": []},
+        "verify_labels": {"low": [], "medium": [], "high": []},
+    }
 
-    `mode probe` works before calibration. Exact switching stays disabled until
-    the user's actual ChatGPT accessibility labels have been inspected.
+
+def default_local_conversation() -> dict[str, Any]:
+    """Safe-by-default current-conversation UIA configuration.
+
+    Composer/send and response collection are intentionally disabled and uncalibrated.
+    No Task can be submitted or treated as response-complete until the user's current
+    ChatGPT build has been probed and configured.
     """
     return {
         "version": 1,
         "enabled": False,
         "backend": "windows-uia",
-        "window": {
-            "title_regex": ".*ChatGPT.*",
+        "window": {"title_regex": ".*ChatGPT.*"},
+        "composer": {
+            "labels": [],
+            "control_types": ["Edit", "Document"],
         },
-        "selector": {
-            "open_labels": [],
+        "send": {
+            "labels": [],
+            "control_types": ["Button"],
         },
-        "family_labels": {
-            "sol": [],
+        "response": {
+            "enabled": False,
+            "busy_labels": [],
+            "busy_control_types": ["Button"],
+            "assistant_control_types": ["Text", "Document"],
+            "assistant_automation_id_regex": "",
+            "poll_interval_seconds": 1.0,
+            "timeout_seconds": 900.0,
+            "stable_polls": 2,
         },
-        "effort_labels": {
-            "low": [],
-            "medium": [],
-            "high": [],
-        },
-        "verify_labels": {
-            "low": [],
-            "medium": [],
-            "high": [],
+        "limits": {
+            "max_prompt_chars": 60000,
         },
     }
 
@@ -219,15 +248,12 @@ def write_default_files(root: Path, project_name: str) -> list[Path]:
     surfaces_path = target / SURFACES_FILE
     context_path = target / ROLLING_CONTEXT_FILE
     local_switch_path = target / LOCAL_SWITCH_FILE
+    local_conversation_path = target / LOCAL_CONVERSATION_FILE
 
     if not project_path.exists():
         project_path.write_text(
             yaml.safe_dump(
-                {
-                    "version": 1,
-                    "name": project_name,
-                    "commands": {"test": [], "build": []},
-                },
+                {"version": 1, "name": project_name, "commands": {"test": [], "build": []}},
                 allow_unicode=True,
                 sort_keys=False,
             ),
@@ -262,6 +288,12 @@ def write_default_files(root: Path, project_name: str) -> list[Path]:
             encoding="utf-8",
         )
 
+    if not local_conversation_path.exists():
+        local_conversation_path.write_text(
+            yaml.safe_dump(default_local_conversation(), allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+
     if not plan_path.exists():
         plan_path.write_text(
             yaml.safe_dump(
@@ -279,14 +311,14 @@ def write_default_files(root: Path, project_name: str) -> list[Path]:
                                     "tasks": [
                                         {
                                             "id": "hello",
-                                            "title": "V0.7 smoke task",
+                                            "title": "V0.8 smoke task",
                                             "kind": "test",
                                             "role": "EXECUTOR",
                                             "max_attempts": 1,
                                             "command": [
                                                 "python",
                                                 "-c",
-                                                "print('Dev Task Router V0.7 is running')",
+                                                "print('Dev Task Router V0.8 is running')",
                                             ],
                                             "checks": [],
                                         }
@@ -302,4 +334,12 @@ def write_default_files(root: Path, project_name: str) -> list[Path]:
             encoding="utf-8",
         )
 
-    return [project_path, plan_path, models_path, surfaces_path, context_path, local_switch_path]
+    return [
+        project_path,
+        plan_path,
+        models_path,
+        surfaces_path,
+        context_path,
+        local_switch_path,
+        local_conversation_path,
+    ]

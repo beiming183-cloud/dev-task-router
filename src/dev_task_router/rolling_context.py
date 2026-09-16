@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .models import Plan, TaskSpec
@@ -23,6 +23,16 @@ def _unique_strings(value: Any, field_name: str) -> tuple[str, ...]:
             seen.add(key)
             result.append(text)
     return tuple(result)
+
+
+def _append_unique(values: tuple[str, ...], note: str) -> tuple[str, ...]:
+    text = " ".join(note.strip().split())
+    if not text:
+        return values
+    key = text.casefold()
+    if any(item.casefold() == key for item in values):
+        return values
+    return (*values, text)
 
 
 def _notes_map(value: Any, field_name: str) -> dict[str, tuple[str, ...]]:
@@ -138,6 +148,42 @@ class RollingProjectContext:
             and repository is not None
             and repository.commit
             and self.last_commit != repository.commit
+        )
+
+    def with_task_note(
+        self,
+        task_id: str,
+        note: str,
+        *,
+        updated_at: str | None = None,
+    ) -> "RollingProjectContext":
+        key = task_id.strip()
+        if not key:
+            raise ValueError("rolling context task note requires a task id")
+        notes = dict(self.task_notes)
+        notes[key] = _append_unique(notes.get(key, ()), note)
+        return replace(
+            self,
+            task_notes=notes,
+            updated_at=updated_at if updated_at is not None else self.updated_at,
+        )
+
+    def with_stage_note(
+        self,
+        stage_id: str,
+        note: str,
+        *,
+        updated_at: str | None = None,
+    ) -> "RollingProjectContext":
+        key = stage_id.strip()
+        if not key:
+            raise ValueError("rolling context stage note requires a stage id")
+        notes = dict(self.stage_notes)
+        notes[key] = _append_unique(notes.get(key, ()), note)
+        return replace(
+            self,
+            stage_notes=notes,
+            updated_at=updated_at if updated_at is not None else self.updated_at,
         )
 
 

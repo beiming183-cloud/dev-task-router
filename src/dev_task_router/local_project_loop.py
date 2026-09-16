@@ -1,0 +1,144 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from .config import load_rolling_context, save_rolling_context
+from .deterministic_runner import DeterministicTaskRunner
+from .handoff import HandoffWriter
+from .local_session import LocalCycleResult, LocalTaskCycle
+from .models import Plan
+from .state import StateStore, now_iso
+
+
+@dataclass(frozen=True, slots=True)
+class LocalProjectLoopResult:
+    cycles: tuple[LocalCycleResult, ...]
+    stop_reason: str
+    workflow_status: str
+
+    @property
+    def last(self) -> LocalCycleResult | None:
+        return self.cycles[-1] if self.cycles else None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "cycles": [item.to_dict() for item in self.cycles],
+            "cycle_count": len(self.cycles),
+            "stop_reason": self.stop_reason,
+            "workflow_status": self.workflow_status,
+        }
+
+
+class LocalProjectLoop:
+    """Bounded project-level loop over model and deterministic Task execution.
+
+    Only verified PASS facts are written into rolling context. The assistant response
+    is never mined for durable decisions or constraints. CHECK_FAILED may continue to
+    another model attempt because it is genuine execution evidence; infrastructure
+    and ambiguous states always stop the loop. Successful NONE tasks can run locally
+    and continue, while deterministic failure stops at DEBUG_TASK_REQUIRED instead of
+    being promoted as a model-difficulty failure.
+    """
+
+    CONTINUE_STATUSES = {"PASSED", "CHECK_FAILED"}
+
+    def __init__(
+        self,
+        root: Path,
+        plan: Plan,
+        store: StateStore,
+        cycle: LocalTaskCycle,
+        *,
+        deterministic_runner: DeterministicTaskRunner | None = None,
+    ):
+        self.root = root
+        self.plan = plan
+        self.store = store
+        self.cycle = cycle
+        self.deterministic_runner = deterministic_runner
+        self.handoff = HandoffWriter(root)
+
+    def _task_title(self, task_id: str) -> str:
+        for task in self.plan.tasks:
+            if task.id == task_id:
+                return task.title
+        return task_id
+
+    def _task_stage(self, task_id: str) -> str:
+        for task in self.plan.tasks:
+            if task.id == task_id:
+                return task.stage_id
+        return "default"
+
+    def _record_verified_pass(self, result: LocalCycleResult) -> None:
+        if result.status != "PASSED" or not result.task_id:
+            return
+        rolling = load_rolling_context(self.root, project=self.plan.project)
+        title = self._task_title(result.task_id)
+        if result.dispatch_id:
+            dispatch = result.dispatch_id[:12]
+            task_note = f"Verified PASS by Checker; dispatch={dispatch}."
+        else:
+            task_note = "Verified deterministic PASS by command/checker."
+        stage_note = f"Verified PASS {result.task_id}: {title}."
+        updated_at = now_iso()
+        rolling = rolling.with_task_note(
+            result.task_id,
+            task_note,
+            updated_at=updated_at,
+        ).with_stage_note(
+            self._task_stage(result.task_id),
+            stage_note,
+            updated_at=updated_at,
+        )
+        # Do not advance last_commit here. Local file changes may not yet have a fresh
+        # repository evidence anchor; stale detection must remain conservative.
+        save_rolling_context(self.root, rolling)
+        self.handoff.write(self.plan, self.store.ensure_for_plan(self.plan))
+
+    def run_one(self) -> LocalCycleResult:
+        result = self.cycle.run_next()
+        if result.status == "DETERMINISTIC" and self.deterministic_runner is not None:
+            task = self.cycle.orchestrator.next_task()
+            if task is None:
+                result = LocalCycleResult("", "NO_TASK", None, False, "workflow has no unresolved task")
+            else:
+                deterministic = self.deterministic_runner.run(task)
+                result = LocalCycleResult(
+                    deterministic.task_id,
+                    deterministic.status,
+                    None,
+                    False,
+                    deterministic.message,
+                    check=deterministic.check,
+                )
+        self._record_verified_pass(result)
+        return result
+
+    def run_until_blocked(self, *, max_cycles: int = 10) -> LocalProjectLoopResult:
+        if max_cycles < 1:
+            raise ValueError("max_cycles must be >= 1")
+
+        results: list[LocalCycleResult] = []
+        stop_reason = "MAX_CYCLES"
+        for _ in range(max_cycles):
+            result = self.run_one()
+            results.append(result)
+
+            if result.status == "NO_TASK":
+                stop_reason = "COMPLETE"
+                break
+            if result.status not in self.CONTINUE_STATUSES:
+                stop_reason = result.status
+                break
+        else:
+            stop_reason = "MAX_CYCLES"
+
+        state = self.store.ensure_for_plan(self.plan)
+        return LocalProjectLoopResult(
+            cycles=tuple(results),
+            stop_reason=stop_reason,
+            workflow_status=str(state.get("status", "UNKNOWN")),
+        )

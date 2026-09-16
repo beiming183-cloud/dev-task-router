@@ -71,6 +71,15 @@ def git_snapshot(root: Path) -> str | None:
     )
 
 
+def snapshot_digest(snapshot: str) -> str:
+    return hashlib.sha256(snapshot.encode("utf-8")).hexdigest()
+
+
+def git_snapshot_digest(root: Path) -> str | None:
+    snapshot = git_snapshot(root)
+    return snapshot_digest(snapshot) if snapshot is not None else None
+
+
 class TaskChecker:
     def __init__(self, command_executor: CommandExecutor | None = None):
         self.command_executor = command_executor or CommandExecutor()
@@ -81,7 +90,8 @@ class TaskChecker:
         *,
         root: Path,
         route: RoutingDecision,
-        before_git: str | None,
+        before_git: str | None = None,
+        before_git_digest: str | None = None,
     ) -> CheckReport:
         output: list[str] = []
         for index, check in enumerate(task.checks, 1):
@@ -108,15 +118,20 @@ class TaskChecker:
 
         if task.require_diff:
             after_git = git_snapshot(root)
-            if before_git is None or after_git is None:
+            if after_git is None or (before_git is None and before_git_digest is None):
                 return CheckReport(
                     False,
-                    "require_diff needs a Git worktree",
+                    "require_diff needs a Git worktree and a pre-dispatch snapshot",
                     "\n".join(output),
                     None,
                     "DIFF",
                 )
-            if before_git == after_git:
+            unchanged = False
+            if before_git_digest is not None:
+                unchanged = snapshot_digest(after_git) == before_git_digest
+            elif before_git is not None:
+                unchanged = before_git == after_git
+            if unchanged:
                 return CheckReport(
                     False,
                     "task required a Git change but working tree did not change",

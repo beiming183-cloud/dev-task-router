@@ -5,3 +5,8 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+
+# Local same-conversation runtime/recovery data. Configuration under .autodev stays trackable.
+.autodev/local-dispatch.json
+.autodev/local-sessions.json
+.autodev/local-responses/

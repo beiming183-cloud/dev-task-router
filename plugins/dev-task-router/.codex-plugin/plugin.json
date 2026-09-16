@@ -1,7 +1,7 @@
 {
   "name": "dev-task-router",
-  "version": "0.7.0",
-  "description": "Decompose software projects, inspect targeted GitHub evidence, classify difficulty, route tasks, and support verified local same-conversation model/reasoning switching.",
+  "version": "0.8.0",
+  "description": "Decompose software projects, keep rolling task context, classify difficulty, route tasks, and gate verified local same-conversation execution.",
   "author": {
     "name": "beiming183-cloud"
   },
@@ -12,17 +12,18 @@
     "task-decomposition",
     "difficulty-classification",
     "model-routing",
+    "rolling-context",
     "local-mode-switching",
+    "same-conversation",
     "github-context",
     "workflow",
-    "handoff",
     "developer-tools"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "项目拆解器",
-    "shortDescription": "按任务难度路由并在本地精确切换模式",
-    "longDescription": "把复杂软件项目拆成可验证 Task，结合 GitHub 仓库事实判断 NONE、LOW、MEDIUM 或 HIGH，再映射到 Chat、Codex、Work 的模型与推理档位。V0.7 优先实现本地同一会话 exact switching：通过轻量 Windows companion 使用 UI Automation/accessibility 标签切换当前 ChatGPT 会话，切换后必须验证实际 profile；不依赖屏幕坐标，也不会把模式切换失败误判成任务难度不足。",
+    "shortDescription": "同会话按任务难度切档并做执行门禁",
+    "longDescription": "把复杂软件项目拆成可验证 Task，结合 GitHub 证据和 Rolling Project Context 判断 NONE、LOW、MEDIUM 或 HIGH，再映射当前 ChatGPT 会话的 requested profile。V0.8 在本地执行前加入硬门禁：Context Pack 必须有效、route 必须解析、模式切换必须 verified 且 actual profile 与 requested profile 一致，才允许后续 conversation driver 发送 Task。模式切换和其他基础设施失败不会误触发 Difficulty 升级。",
     "developerName": "beiming183-cloud",
     "category": "Developer Tools",
     "capabilities": [
@@ -30,9 +31,9 @@
     ],
     "websiteURL": "https://github.com/beiming183-cloud/dev-task-router",
     "defaultPrompt": [
-      "把这个复杂项目拆成任务，简单任务用低推理，复杂任务用高推理，并保持同一个项目会话。",
-      "结合当前 GitHub 仓库判断下一任务难度，并给出本地 exact mode switch 目标。",
-      "检查当前任务的 requested profile 和 actual profile 是否一致，只有验证成功后再继续。"
+      "准备下一个开发任务的 Context Pack、难度和 requested profile，但在 actual profile 未验证前不要发送。",
+      "检查当前 GitHub commit、Rolling Context 和本地模式切换状态，只有 execution gate 通过后才能继续。",
+      "保持同一个项目会话：拆 Task，不拆 conversation。"
     ]
   }
 }
