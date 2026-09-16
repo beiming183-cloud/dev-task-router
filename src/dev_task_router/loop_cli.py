@@ -16,6 +16,7 @@ from .conversation_ui import (
 )
 from .deterministic_runner import DeterministicTaskRunner
 from .evidence_cycle import EvidenceTrackingCycle
+from .execution_audit import LocalExecutionAuditor
 from .execution_evidence import ExecutionEvidenceLedger
 from .local_loop import DryRunConversationBackend, LocalConversationOrchestrator
 from .local_project_loop import LocalProjectLoop
@@ -89,6 +90,7 @@ def _project_loop(root: Path) -> LocalProjectLoop:
         cycle.plan,
         cycle.store,
         cycle.orchestrator.router,
+        evidence=cycle.evidence,
     )
     return LocalProjectLoop(
         root,
@@ -307,6 +309,30 @@ def cmd_evidence(args: argparse.Namespace) -> int:
     return 0 if payload["chain_valid"] else 1
 
 
+def cmd_audit(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    report = LocalExecutionAuditor(root).run()
+    payload = report.to_dict()
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"audit: {'PASS' if report.ok else 'FAIL'}")
+        print(f"errors: {len(report.errors)}")
+        print(f"warnings: {len(report.warnings)}")
+        print(f"evidence events: {report.evidence_events}")
+        print(f"sessions: {report.session_count}")
+        print(f"dispatches: {report.dispatch_count}")
+        for issue in report.issues:
+            where = []
+            if issue.task_id:
+                where.append(f"task={issue.task_id}")
+            if issue.dispatch_id:
+                where.append(f"dispatch={issue.dispatch_id}")
+            suffix = f" ({', '.join(where)})" if where else ""
+            print(f"{issue.severity} {issue.code}: {issue.message}{suffix}")
+    return 0 if report.ok else 1
+
+
 def cmd_continue(args: argparse.Namespace) -> int:
     root = project_root(args.root)
     result = _project_loop(root).run_until_blocked(max_cycles=args.max_cycles)
@@ -320,7 +346,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="autodev-local",
         description=(
-            "Prepare, gate, dispatch, collect, recover, and verify Tasks in the canonical local ChatGPT conversation"
+            "Prepare, gate, dispatch, collect, recover, audit, and verify Tasks in the canonical local ChatGPT conversation"
         ),
     )
     parser.add_argument("--root", help="project root; defaults to current directory")
@@ -386,6 +412,13 @@ def build_parser() -> argparse.ArgumentParser:
     evidence.add_argument("--dispatch-id", help="show events for one dispatch only")
     evidence.add_argument("--json", action="store_true", help="print evidence as JSON")
     evidence.set_defaults(func=cmd_evidence)
+
+    audit = sub.add_parser(
+        "audit",
+        help="cross-check evidence, sessions, dispatch ledger, response digests, and workflow state without mutating them",
+    )
+    audit.add_argument("--json", action="store_true", help="print the audit report as JSON")
+    audit.set_defaults(func=cmd_audit)
 
     continuous = sub.add_parser(
         "continue",
