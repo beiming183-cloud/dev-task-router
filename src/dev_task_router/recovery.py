@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,67 @@ class LocalRecoveryController:
             or current.latest_digest != baseline.latest_digest
         )
 
+    def _recover_written_response(
+        self,
+        task_id: str,
+        dispatch_id: str,
+        session: dict[str, Any],
+    ) -> RecoveryResult | None:
+        status = str(session.get("status", ""))
+        if status not in {"SUBMITTED", "WAITING_RESPONSE"}:
+            return None
+        if session.get("response_digest") or session.get("response_path"):
+            return None
+
+        path = self.sessions.response_dir / f"{dispatch_id}.txt"
+        if not path.is_file():
+            return None
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            self.evidence.record(
+                task_id=task_id,
+                dispatch_id=dispatch_id,
+                kind="RECOVERY_AMBIGUOUS",
+                data={"reason": "orphan_response_unreadable", "error": str(exc)},
+            )
+            return RecoveryResult(
+                task_id,
+                dispatch_id,
+                "AMBIGUOUS",
+                False,
+                False,
+                f"orphan response file exists but could not be verified: {exc}",
+            )
+
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        relative = path.relative_to(self.root).as_posix()
+        self.sessions.update(
+            dispatch_id,
+            status="COLLECTED",
+            response_path=relative,
+            response_digest=digest,
+            recovery_reason="response file was durable before session metadata update",
+        )
+        self.evidence.record(
+            task_id=task_id,
+            dispatch_id=dispatch_id,
+            kind="RECOVERY_RESPONSE_FILE",
+            data={
+                "response_digest": digest,
+                "response_chars": len(text),
+                "response_path": relative,
+            },
+        )
+        return RecoveryResult(
+            task_id,
+            dispatch_id,
+            "RESUME",
+            False,
+            True,
+            "durable response file recovered into COLLECTED state; resume Checker without resending",
+        )
+
     def reconcile_next(self) -> RecoveryResult:
         task = self.cycle.orchestrator.next_task()
         if task is None:
@@ -81,6 +143,10 @@ class LocalRecoveryController:
             )
 
         dispatch_id, session = active
+        written_response = self._recover_written_response(task.id, dispatch_id, session)
+        if written_response is not None:
+            return written_response
+
         session_status = str(session.get("status", ""))
         if session_status != "PREPARED":
             return RecoveryResult(
