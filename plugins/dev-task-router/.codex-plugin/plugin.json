@@ -1,7 +1,7 @@
 {
   "name": "dev-task-router",
-  "version": "0.8.0",
-  "description": "Decompose software projects, keep rolling task context, classify difficulty, route tasks, and gate verified local same-conversation execution.",
+  "version": "0.9.0",
+  "description": "Decompose software projects, keep rolling task context, route difficulty, gate verified same-conversation execution, and recover or audit local execution evidence.",
   "author": {
     "name": "beiming183-cloud"
   },
@@ -16,14 +16,16 @@
     "local-mode-switching",
     "same-conversation",
     "github-context",
+    "recovery",
+    "execution-evidence",
     "workflow",
     "developer-tools"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "项目拆解器",
-    "shortDescription": "同会话按任务难度切档并做执行门禁",
-    "longDescription": "把复杂软件项目拆成可验证 Task，结合 GitHub 证据和 Rolling Project Context 判断 NONE、LOW、MEDIUM 或 HIGH，再映射当前 ChatGPT 会话的 requested profile。V0.8 在本地执行前加入硬门禁：Context Pack 必须有效、route 必须解析、模式切换必须 verified 且 actual profile 与 requested profile 一致，才允许后续 conversation driver 发送 Task。模式切换和其他基础设施失败不会误触发 Difficulty 升级。",
+    "shortDescription": "同会话按难度切档并做恢复与证据审计",
+    "longDescription": "把复杂软件项目拆成可验证 Task，结合 GitHub 证据和 Rolling Project Context 判断 NONE、LOW、MEDIUM 或 HIGH，再映射当前 ChatGPT 会话的 requested profile。V0.9 在 V0.8 执行门禁之上增加 append-only execution evidence、PREPARED/ambiguous-send 保守恢复、跨 session/dispatch/workflow 一致性审计、严格 repository anchor 同步，以及显式外部独立 Reviewer 边界。基础设施失败仍不会误触发 Difficulty 升级。",
     "developerName": "beiming183-cloud",
     "category": "Developer Tools",
     "capabilities": [
@@ -31,9 +33,9 @@
     ],
     "websiteURL": "https://github.com/beiming183-cloud/dev-task-router",
     "defaultPrompt": [
-      "准备下一个开发任务的 Context Pack、难度和 requested profile，但在 actual profile 未验证前不要发送。",
-      "检查当前 GitHub commit、Rolling Context 和本地模式切换状态，只有 execution gate 通过后才能继续。",
-      "保持同一个项目会话：拆 Task，不拆 conversation。"
+      "继续下一个开发任务前，检查 Context Pack、requested/actual profile、execution evidence 和恢复状态；不确定发送边界时不要重复发送。",
+      "如果本地执行状态不一致，先做 recovery/audit；只有客观 Checker、Review 或 GitHub/CI 证据才能推进 Task。",
+      "保持同一个项目会话：拆 Task，不拆 conversation；基础设施失败不得被误判成模型能力不足。"
     ]
   }
 }
